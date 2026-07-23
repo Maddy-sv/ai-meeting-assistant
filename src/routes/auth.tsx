@@ -22,9 +22,17 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) router.navigate({ to: "/dashboard", replace: true });
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (mounted && data.session) router.navigate({ to: "/dashboard", replace: true });
     });
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session) {
+        router.navigate({ to: "/dashboard", replace: true });
+      }
+    });
+    return () => { mounted = false; sub.subscription.unsubscribe(); };
   }, [router]);
 
   async function submit(e: React.FormEvent) {
@@ -34,15 +42,13 @@ function AuthPage() {
       if (mode === "signup") {
         const { error } = await supabase.auth.signUp({
           email, password,
-          options: { data: { full_name: name }, emailRedirectTo: window.location.origin },
+          options: { data: { full_name: name }, emailRedirectTo: window.location.origin + "/auth" },
         });
         if (error) throw error;
         toast.success("Account created. You're signed in.");
-        router.navigate({ to: "/dashboard", replace: true });
       } else if (mode === "signin") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        router.navigate({ to: "/dashboard", replace: true });
       } else {
         const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + "/reset-password" });
         if (error) throw error;
@@ -58,12 +64,17 @@ function AuthPage() {
 
   async function google() {
     setLoading(true);
-    const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin + "/auth" });
-    if (result.error) { toast.error(result.error.message); setLoading(false); return; }
-    if (result.redirected) return;
-    router.navigate({ to: "/dashboard", replace: true });
-    setLoading(false);
+    try {
+      const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin });
+      if (result.error) { toast.error(result.error.message); return; }
+      // If redirected, browser is leaving. If not, onAuthStateChange will navigate.
+    } catch (e: any) {
+      toast.error(e?.message || "Google sign-in failed");
+    } finally {
+      setLoading(false);
+    }
   }
+
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4 py-10">
