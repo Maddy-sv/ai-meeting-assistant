@@ -233,7 +233,7 @@ function MeetingDetail() {
         </div>
         <div className="flex flex-wrap gap-2">
           {!live && m.status !== "completed" && (
-            <Button onClick={startLive} className="gradient-bg rounded-full shadow-glow">
+            <Button onClick={() => setConsentOpen(true)} className="gradient-bg rounded-full shadow-glow">
               <Video className="mr-2 h-4 w-4" /> Join as AI Assistant
             </Button>
           )}
@@ -243,7 +243,10 @@ function MeetingDetail() {
                 {paused ? <Play className="mr-2 h-4 w-4" /> : <Pause className="mr-2 h-4 w-4" />}
                 {paused ? "Resume" : "Pause"}
               </Button>
-              <Button variant="destructive" className="rounded-full" onClick={endMeeting}>End meeting</Button>
+              <Button variant="destructive" className="rounded-full" onClick={endMeeting} disabled={summarizing}>
+                {summarizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                End meeting
+              </Button>
             </>
           )}
           <Button variant="outline" className="glass rounded-full border-white/10" onClick={download}>
@@ -251,6 +254,39 @@ function MeetingDetail() {
           </Button>
         </div>
       </header>
+
+      {live && (
+        <div className="glass flex items-center gap-3 rounded-2xl p-4 text-sm">
+          <Mic className={"h-4 w-4 " + (paused ? "text-muted-foreground" : "text-primary animate-pulse")} />
+          <span className="text-muted-foreground shrink-0">{paused ? "Paused" : "Listening…"}</span>
+          <span className="truncate italic text-foreground/80">{interim || "Speak now — your words appear here in real time."}</span>
+        </div>
+      )}
+
+      <Dialog open={consentOpen} onOpenChange={setConsentOpen}>
+        <DialogContent className="glass border-white/10">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" /> Consent to record & transcribe</DialogTitle>
+            <DialogDescription className="pt-2 text-sm">
+              Zeta will use your microphone to transcribe this meeting in real time. Audio is <b>not stored</b> — only the text transcript is saved to your account and used to generate an AI summary.
+              <br /><br />
+              Please make sure everyone in the meeting agrees to being transcribed before you continue.
+              {!micSupported && (
+                <span className="mt-3 block rounded-lg bg-red-500/10 p-3 text-red-300">
+                  Live transcription needs Chrome, Edge, or Safari. Your current browser doesn't support it.
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" className="glass rounded-full border-white/10" onClick={() => setConsentOpen(false)}>Cancel</Button>
+            <Button className="gradient-bg rounded-full shadow-glow" onClick={beginRecording} disabled={!micSupported}>
+              <Mic className="mr-2 h-4 w-4" /> I consent — start recording
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       <Tabs defaultValue="transcript">
         <TabsList className="glass border-white/10">
