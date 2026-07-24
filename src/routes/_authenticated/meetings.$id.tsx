@@ -299,7 +299,7 @@ function MeetingDetail() {
         <TabsContent value="transcript">
           <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
             <div ref={scrollRef} className="glass max-h-[60vh] overflow-y-auto rounded-2xl p-6">
-              {transcripts.length === 0 && <p className="text-sm text-muted-foreground">No transcript yet. Join as AI Assistant to start capturing.</p>}
+              {transcripts.length === 0 && <p className="text-sm text-muted-foreground">No transcript yet. Click <b>Join as AI Assistant</b>, give consent, and start speaking — your words appear here live.</p>}
               <div className="space-y-3">
                 {transcripts.map((t) => (
                   <div key={t.id} className="glass rounded-xl p-3">
