@@ -2,10 +2,13 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDuration } from "@/lib/mock-data";
-import { ArrowLeft, Download, Mail, Pause, Play, Sparkles, Users, Video, Circle } from "lucide-react";
+import { useServerFn } from "@tanstack/react-start";
+import { summarizeMeeting } from "@/lib/ai.functions";
+import { ArrowLeft, Download, Mail, Mic, Pause, Play, Sparkles, Users, Video, Circle, ShieldCheck, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/meetings/$id")({
@@ -19,14 +22,6 @@ type Participant = { id: string; name: string; email: string | null; role: strin
 type Summary = { executive_summary: string | null; key_points: string[]; risks: string[]; follow_ups: string[] };
 type Action = { id: string; title: string; assignee: string | null; deadline: string | null; status: string };
 type Decision = { id: string; description: string; made_by: string | null };
-
-const DEMO_LINES = [
-  { s: "Anna Chen", t: "Let's kick things off — welcome everyone." },
-  { s: "Marcus Reed", t: "I've got an update on the migration progress." },
-  { s: "Priya Shah", t: "Quick note: we still need sign-off from security." },
-  { s: "Anna Chen", t: "Great, let's slot that into next steps." },
-  { s: "Marcus Reed", t: "I'll draft the timeline and share by EOD." },
-];
 
 function MeetingDetail() {
   const { id } = Route.useParams();
