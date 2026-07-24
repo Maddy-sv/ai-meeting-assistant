@@ -35,8 +35,26 @@ function MeetingDetail() {
   const [live, setLive] = useState(false);
   const [paused, setPaused] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [interim, setInterim] = useState("");
+  const [summarizing, setSummarizing] = useState(false);
+  const [micSupported, setMicSupported] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const segCounterRef = useRef(0);
+  const pausedRef = useRef(false);
+  const streamRef = useRef<MediaStream | null>(null);
+  const summarize = useServerFn(summarizeMeeting);
+
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      setMicSupported(!!SR);
+    }
+  }, []);
 
   async function load() {
     const [mm, tt, pp, ss, aa, dd] = await Promise.all([
@@ -53,54 +71,130 @@ function MeetingDetail() {
     setSummary(ss.data ? (ss.data as any) : null);
     setActions((aa.data as Action[]) ?? []);
     setDecisions((dd.data as Decision[]) ?? []);
+    segCounterRef.current = ((tt.data as Transcript[]) ?? []).length;
   }
   useEffect(() => { load(); }, [id]);
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [transcripts.length]);
 
-  function startLive() {
+  async function beginRecording() {
+    setConsentOpen(false);
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      toast.error("Your browser doesn't support live transcription. Try Chrome or Edge.");
+      return;
+    }
+
+    // Ask for microphone permission explicitly
+    try {
+      streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      toast.error("Microphone permission denied. Enable it in your browser to transcribe.");
+      return;
+    }
+
+    // Get speaker name from profile
+    const { data: user } = await supabase.auth.getUser();
+    const { data: prof } = await supabase
+      .from("profiles").select("full_name").eq("id", user.user?.id ?? "").maybeSingle();
+    const speaker = (prof as any)?.full_name || user.user?.email?.split("@")[0] || "You";
+
     setLive(true); setPaused(false); setElapsed(0);
-    let i = 0;
-    timerRef.current = setInterval(async () => {
-      setElapsed((e) => e + 3);
-      if (paused) return;
-      const line = DEMO_LINES[i % DEMO_LINES.length];
-      i++;
-      const seg = transcripts.length + i;
-      await supabase.from("transcripts").insert({ meeting_id: id, speaker: line.s, content: line.t, segment_index: seg });
-      await load();
-    }, 3000);
+    await supabase.from("meetings").update({
+      status: "in_progress",
+      started_at: new Date().toISOString(),
+    }).eq("id", id);
+
+    timerRef.current = setInterval(() => {
+      if (!pausedRef.current) setElapsed((e) => e + 1);
+    }, 1000);
+
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = navigator.language || "en-US";
+
+    rec.onresult = async (event: any) => {
+      if (pausedRef.current) return;
+      let interimText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const res = event.results[i];
+        const text = res[0].transcript.trim();
+        if (!text) continue;
+        if (res.isFinal) {
+          segCounterRef.current += 1;
+          await supabase.from("transcripts").insert({
+            meeting_id: id,
+            speaker,
+            content: text,
+            segment_index: segCounterRef.current,
+          });
+          await load();
+        } else {
+          interimText += text + " ";
+        }
+      }
+      setInterim(interimText);
+    };
+
+    rec.onerror = (e: any) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        toast.error("Microphone access blocked.");
+        stopLive();
+      } else if (e.error === "no-speech") {
+        // ignore
+      }
+    };
+
+    rec.onend = () => {
+      // Auto-restart if still live (some browsers auto-stop after silence)
+      if (live && !pausedRef.current) {
+        try { rec.start(); } catch { /* noop */ }
+      }
+    };
+
+    try { rec.start(); } catch { /* noop */ }
+    recognitionRef.current = rec;
+    toast.success("Recording started — I'm listening.");
   }
 
   function stopLive() {
     if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
+    if (recognitionRef.current) {
+      try { recognitionRef.current.onend = null; recognitionRef.current.stop(); } catch { /* noop */ }
+      recognitionRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
     setLive(false);
+    setInterim("");
   }
 
   async function endMeeting() {
     stopLive();
-    await supabase.from("meetings").update({ status: "completed", ended_at: new Date().toISOString(), duration_seconds: elapsed, started_at: m?.started_at ?? new Date(Date.now() - elapsed * 1000).toISOString() }).eq("id", id);
+    await supabase.from("meetings").update({
+      status: "completed",
+      ended_at: new Date().toISOString(),
+      duration_seconds: elapsed,
+      started_at: m?.started_at ?? new Date(Date.now() - elapsed * 1000).toISOString(),
+    }).eq("id", id);
 
-    // AI summary simulation
-    if (!summary) {
-      await supabase.from("ai_summaries").insert({
-        meeting_id: id,
-        executive_summary: "Team synced on progress. Marcus will circulate a detailed migration timeline; Priya highlighted the need for security sign-off before rollout.",
-        key_points: ["Migration progress reviewed", "Timeline to be shared by EOD", "Security sign-off required"],
-        risks: ["Rollout blocked until security review"],
-        follow_ups: ["Send recap email", "Schedule security review"],
-      });
-      await supabase.from("action_items").insert([
-        { meeting_id: id, title: "Draft migration timeline", assignee: "Marcus Reed", deadline: new Date(Date.now() + 86400000).toISOString() },
-        { meeting_id: id, title: "Schedule security review", assignee: "Priya Shah", deadline: new Date(Date.now() + 2 * 86400000).toISOString() },
-      ]);
-      await supabase.from("decisions").insert({ meeting_id: id, description: "Timeline to be circulated by EOD", made_by: "Anna Chen" });
+    setSummarizing(true);
+    try {
+      await summarize({ data: { meetingId: id } });
+      toast.success("AI summary generated from your transcript.");
+    } catch (err: any) {
+      toast.error(err?.message || "Couldn't generate summary.");
+    } finally {
+      setSummarizing(false);
+      await load();
     }
-    toast.success("Meeting ended — AI summary ready");
-    await load();
   }
 
-  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+  useEffect(() => () => { stopLive(); }, []);
 
   const emailDraft = useMemo(() => {
     if (!summary) return "";
