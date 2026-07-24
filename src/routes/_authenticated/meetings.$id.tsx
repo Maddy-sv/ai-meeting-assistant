@@ -329,7 +329,7 @@ function MeetingDetail() {
 
         <TabsContent value="summary">
           {!summary ? (
-            <div className="glass rounded-2xl p-8 text-center text-sm text-muted-foreground">Summary will appear here once the meeting ends.</div>
+            <div className="glass rounded-2xl p-8 text-center text-sm text-muted-foreground">{summarizing ? "Generating AI summary from your transcript…" : "Summary will appear here once the meeting ends."}</div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
               <div className="glass rounded-2xl p-6 md:col-span-2">
