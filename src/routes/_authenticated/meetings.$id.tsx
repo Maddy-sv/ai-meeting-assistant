@@ -2,10 +2,13 @@ import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { formatDuration } from "@/lib/mock-data";
-import { ArrowLeft, Download, Mail, Pause, Play, Sparkles, Users, Video, Circle } from "lucide-react";
+import { useServerFn } from "@tanstack/react-start";
+import { summarizeMeeting } from "@/lib/ai.functions";
+import { ArrowLeft, Download, Mail, Mic, Pause, Play, Sparkles, Users, Video, Circle, ShieldCheck, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/meetings/$id")({
@@ -20,14 +23,6 @@ type Summary = { executive_summary: string | null; key_points: string[]; risks: 
 type Action = { id: string; title: string; assignee: string | null; deadline: string | null; status: string };
 type Decision = { id: string; description: string; made_by: string | null };
 
-const DEMO_LINES = [
-  { s: "Anna Chen", t: "Let's kick things off — welcome everyone." },
-  { s: "Marcus Reed", t: "I've got an update on the migration progress." },
-  { s: "Priya Shah", t: "Quick note: we still need sign-off from security." },
-  { s: "Anna Chen", t: "Great, let's slot that into next steps." },
-  { s: "Marcus Reed", t: "I'll draft the timeline and share by EOD." },
-];
-
 function MeetingDetail() {
   const { id } = Route.useParams();
   const router = useRouter();
@@ -40,8 +35,26 @@ function MeetingDetail() {
   const [live, setLive] = useState(false);
   const [paused, setPaused] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [interim, setInterim] = useState("");
+  const [summarizing, setSummarizing] = useState(false);
+  const [micSupported, setMicSupported] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const segCounterRef = useRef(0);
+  const pausedRef = useRef(false);
+  const streamRef = useRef<MediaStream | null>(null);
+  const summarize = useServerFn(summarizeMeeting);
+
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      setMicSupported(!!SR);
+    }
+  }, []);
 
   async function load() {
     const [mm, tt, pp, ss, aa, dd] = await Promise.all([
@@ -58,54 +71,130 @@ function MeetingDetail() {
     setSummary(ss.data ? (ss.data as any) : null);
     setActions((aa.data as Action[]) ?? []);
     setDecisions((dd.data as Decision[]) ?? []);
+    segCounterRef.current = ((tt.data as Transcript[]) ?? []).length;
   }
   useEffect(() => { load(); }, [id]);
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [transcripts.length]);
 
-  function startLive() {
+  async function beginRecording() {
+    setConsentOpen(false);
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) {
+      toast.error("Your browser doesn't support live transcription. Try Chrome or Edge.");
+      return;
+    }
+
+    // Ask for microphone permission explicitly
+    try {
+      streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      toast.error("Microphone permission denied. Enable it in your browser to transcribe.");
+      return;
+    }
+
+    // Get speaker name from profile
+    const { data: user } = await supabase.auth.getUser();
+    const { data: prof } = await supabase
+      .from("profiles").select("full_name").eq("id", user.user?.id ?? "").maybeSingle();
+    const speaker = (prof as any)?.full_name || user.user?.email?.split("@")[0] || "You";
+
     setLive(true); setPaused(false); setElapsed(0);
-    let i = 0;
-    timerRef.current = setInterval(async () => {
-      setElapsed((e) => e + 3);
-      if (paused) return;
-      const line = DEMO_LINES[i % DEMO_LINES.length];
-      i++;
-      const seg = transcripts.length + i;
-      await supabase.from("transcripts").insert({ meeting_id: id, speaker: line.s, content: line.t, segment_index: seg });
-      await load();
-    }, 3000);
+    await supabase.from("meetings").update({
+      status: "in_progress",
+      started_at: new Date().toISOString(),
+    }).eq("id", id);
+
+    timerRef.current = setInterval(() => {
+      if (!pausedRef.current) setElapsed((e) => e + 1);
+    }, 1000);
+
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = navigator.language || "en-US";
+
+    rec.onresult = async (event: any) => {
+      if (pausedRef.current) return;
+      let interimText = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const res = event.results[i];
+        const text = res[0].transcript.trim();
+        if (!text) continue;
+        if (res.isFinal) {
+          segCounterRef.current += 1;
+          await supabase.from("transcripts").insert({
+            meeting_id: id,
+            speaker,
+            content: text,
+            segment_index: segCounterRef.current,
+          });
+          await load();
+        } else {
+          interimText += text + " ";
+        }
+      }
+      setInterim(interimText);
+    };
+
+    rec.onerror = (e: any) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        toast.error("Microphone access blocked.");
+        stopLive();
+      } else if (e.error === "no-speech") {
+        // ignore
+      }
+    };
+
+    rec.onend = () => {
+      // Auto-restart if still live (some browsers auto-stop after silence)
+      if (live && !pausedRef.current) {
+        try { rec.start(); } catch { /* noop */ }
+      }
+    };
+
+    try { rec.start(); } catch { /* noop */ }
+    recognitionRef.current = rec;
+    toast.success("Recording started — I'm listening.");
   }
 
   function stopLive() {
     if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
+    if (recognitionRef.current) {
+      try { recognitionRef.current.onend = null; recognitionRef.current.stop(); } catch { /* noop */ }
+      recognitionRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
     setLive(false);
+    setInterim("");
   }
 
   async function endMeeting() {
     stopLive();
-    await supabase.from("meetings").update({ status: "completed", ended_at: new Date().toISOString(), duration_seconds: elapsed, started_at: m?.started_at ?? new Date(Date.now() - elapsed * 1000).toISOString() }).eq("id", id);
+    await supabase.from("meetings").update({
+      status: "completed",
+      ended_at: new Date().toISOString(),
+      duration_seconds: elapsed,
+      started_at: m?.started_at ?? new Date(Date.now() - elapsed * 1000).toISOString(),
+    }).eq("id", id);
 
-    // AI summary simulation
-    if (!summary) {
-      await supabase.from("ai_summaries").insert({
-        meeting_id: id,
-        executive_summary: "Team synced on progress. Marcus will circulate a detailed migration timeline; Priya highlighted the need for security sign-off before rollout.",
-        key_points: ["Migration progress reviewed", "Timeline to be shared by EOD", "Security sign-off required"],
-        risks: ["Rollout blocked until security review"],
-        follow_ups: ["Send recap email", "Schedule security review"],
-      });
-      await supabase.from("action_items").insert([
-        { meeting_id: id, title: "Draft migration timeline", assignee: "Marcus Reed", deadline: new Date(Date.now() + 86400000).toISOString() },
-        { meeting_id: id, title: "Schedule security review", assignee: "Priya Shah", deadline: new Date(Date.now() + 2 * 86400000).toISOString() },
-      ]);
-      await supabase.from("decisions").insert({ meeting_id: id, description: "Timeline to be circulated by EOD", made_by: "Anna Chen" });
+    setSummarizing(true);
+    try {
+      await summarize({ data: { meetingId: id } });
+      toast.success("AI summary generated from your transcript.");
+    } catch (err: any) {
+      toast.error(err?.message || "Couldn't generate summary.");
+    } finally {
+      setSummarizing(false);
+      await load();
     }
-    toast.success("Meeting ended — AI summary ready");
-    await load();
   }
 
-  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+  useEffect(() => () => { stopLive(); }, []);
 
   const emailDraft = useMemo(() => {
     if (!summary) return "";
@@ -144,7 +233,7 @@ function MeetingDetail() {
         </div>
         <div className="flex flex-wrap gap-2">
           {!live && m.status !== "completed" && (
-            <Button onClick={startLive} className="gradient-bg rounded-full shadow-glow">
+            <Button onClick={() => setConsentOpen(true)} className="gradient-bg rounded-full shadow-glow">
               <Video className="mr-2 h-4 w-4" /> Join as AI Assistant
             </Button>
           )}
@@ -154,7 +243,10 @@ function MeetingDetail() {
                 {paused ? <Play className="mr-2 h-4 w-4" /> : <Pause className="mr-2 h-4 w-4" />}
                 {paused ? "Resume" : "Pause"}
               </Button>
-              <Button variant="destructive" className="rounded-full" onClick={endMeeting}>End meeting</Button>
+              <Button variant="destructive" className="rounded-full" onClick={endMeeting} disabled={summarizing}>
+                {summarizing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                End meeting
+              </Button>
             </>
           )}
           <Button variant="outline" className="glass rounded-full border-white/10" onClick={download}>
@@ -162,6 +254,39 @@ function MeetingDetail() {
           </Button>
         </div>
       </header>
+
+      {live && (
+        <div className="glass flex items-center gap-3 rounded-2xl p-4 text-sm">
+          <Mic className={"h-4 w-4 " + (paused ? "text-muted-foreground" : "text-primary animate-pulse")} />
+          <span className="text-muted-foreground shrink-0">{paused ? "Paused" : "Listening…"}</span>
+          <span className="truncate italic text-foreground/80">{interim || "Speak now — your words appear here in real time."}</span>
+        </div>
+      )}
+
+      <Dialog open={consentOpen} onOpenChange={setConsentOpen}>
+        <DialogContent className="glass border-white/10">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" /> Consent to record & transcribe</DialogTitle>
+            <DialogDescription className="pt-2 text-sm">
+              Zeta will use your microphone to transcribe this meeting in real time. Audio is <b>not stored</b> — only the text transcript is saved to your account and used to generate an AI summary.
+              <br /><br />
+              Please make sure everyone in the meeting agrees to being transcribed before you continue.
+              {!micSupported && (
+                <span className="mt-3 block rounded-lg bg-red-500/10 p-3 text-red-300">
+                  Live transcription needs Chrome, Edge, or Safari. Your current browser doesn't support it.
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" className="glass rounded-full border-white/10" onClick={() => setConsentOpen(false)}>Cancel</Button>
+            <Button className="gradient-bg rounded-full shadow-glow" onClick={beginRecording} disabled={!micSupported}>
+              <Mic className="mr-2 h-4 w-4" /> I consent — start recording
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       <Tabs defaultValue="transcript">
         <TabsList className="glass border-white/10">
@@ -174,7 +299,7 @@ function MeetingDetail() {
         <TabsContent value="transcript">
           <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
             <div ref={scrollRef} className="glass max-h-[60vh] overflow-y-auto rounded-2xl p-6">
-              {transcripts.length === 0 && <p className="text-sm text-muted-foreground">No transcript yet. Join as AI Assistant to start capturing.</p>}
+              {transcripts.length === 0 && <p className="text-sm text-muted-foreground">No transcript yet. Click <b>Join as AI Assistant</b>, give consent, and start speaking — your words appear here live.</p>}
               <div className="space-y-3">
                 {transcripts.map((t) => (
                   <div key={t.id} className="glass rounded-xl p-3">
@@ -204,7 +329,7 @@ function MeetingDetail() {
 
         <TabsContent value="summary">
           {!summary ? (
-            <div className="glass rounded-2xl p-8 text-center text-sm text-muted-foreground">Summary will appear here once the meeting ends.</div>
+            <div className="glass rounded-2xl p-8 text-center text-sm text-muted-foreground">{summarizing ? "Generating AI summary from your transcript…" : "Summary will appear here once the meeting ends."}</div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
               <div className="glass rounded-2xl p-6 md:col-span-2">
