@@ -4,9 +4,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { Send, Sparkles, Bot, User as UserIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { askChatBot } from "@/lib/ai.functions";
 
 export const Route = createFileRoute("/_authenticated/chat")({
-  head: () => ({ meta: [{ title: "AI Chat — Zeta" }] }),
+  head: () => ({ meta: [{ title: "AI Chat Bot — AI Powered Meeting Companion" }] }),
   component: ChatPage,
 });
 
@@ -21,7 +22,7 @@ const SUGGESTIONS = [
 
 function ChatPage() {
   const [messages, setMessages] = useState<Msg[]>([
-    { role: "assistant", content: "Hi, I'm Zeta. Ask me anything about your meetings — decisions, action items, discussions or people." },
+    { role: "assistant", content: "Hi, I'm AI Powered Meeting Companion. Ask me anything about your meetings — decisions, action items, discussions or people." },
   ]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
@@ -29,59 +30,29 @@ function ChatPage() {
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, thinking]);
 
-  async function answer(q: string): Promise<string> {
-    const lc = q.toLowerCase();
-    const { data: meetings } = await supabase.from("meetings").select("*").order("created_at", { ascending: false });
-    const { data: summaries } = await supabase.from("ai_summaries").select("*");
-    const { data: actions } = await supabase.from("action_items").select("*");
-    const { data: decisions } = await supabase.from("decisions").select("*");
-    const { data: transcripts } = await supabase.from("transcripts").select("*").limit(200);
-
-    if (lc.includes("decision")) {
-      if (!decisions || decisions.length === 0) return "No decisions have been logged yet.";
-      return "Recent decisions:\n" + decisions.slice(0, 5).map((d: any) => `• ${d.description}${d.made_by ? ` (${d.made_by})` : ""}`).join("\n");
-    }
-    if (lc.includes("responsible") || lc.includes("who") || lc.includes("owner") || lc.includes("assign")) {
-      if (!actions || actions.length === 0) return "No action items yet.";
-      return "Owners and action items:\n" + actions.slice(0, 8).map((a: any) => `• ${a.title} — ${a.assignee ?? "unassigned"}`).join("\n");
-    }
-    if (lc.includes("yesterday") || lc.includes("last")) {
-      const past = (meetings ?? []).filter((m: any) => m.status === "completed");
-      if (past.length === 0) return "No past meetings on record.";
-      const sum = (summaries ?? []).find((s: any) => s.meeting_id === past[0].id);
-      return `Last meeting: "${past[0].title}".\n\n${sum?.executive_summary ?? "No summary available."}`;
-    }
-    if (lc.includes("meeting") || lc.includes("show")) {
-      const matches = (transcripts ?? []).filter((t: any) => q.split(" ").some((w) => w.length > 3 && t.content.toLowerCase().includes(w.toLowerCase())));
-      if (matches.length > 0) {
-        const ids = Array.from(new Set(matches.map((t: any) => t.meeting_id)));
-        const named = ids.map((id) => (meetings ?? []).find((m: any) => m.id === id)?.title).filter(Boolean);
-        return `Found ${matches.length} mentions across ${named.length} meeting(s):\n` + named.map((n) => `• ${n}`).join("\n");
-      }
-      return "I couldn't find matching mentions in your meeting history.";
-    }
-    if (summaries && summaries.length) {
-      return `Here's what I know from recent meetings:\n\n${summaries.slice(0, 2).map((s: any) => `• ${s.executive_summary}`).join("\n\n")}`;
-    }
-    return "I don't have enough context yet. Try running a meeting first and I'll build memory.";
-  }
-
   async function send(text?: string) {
     const q = (text ?? input).trim();
     if (!q) return;
     setInput("");
-    setMessages((m) => [...m, { role: "user", content: q }]);
+    
+    const newMessages: Msg[] = [...messages, { role: "user", content: q }];
+    setMessages(newMessages);
     setThinking(true);
-    const reply = await answer(q);
-    await new Promise((r) => setTimeout(r, 400));
-    setMessages((m) => [...m, { role: "assistant", content: reply }]);
-    setThinking(false);
+    
+    try {
+      const reply = await askChatBot({ data: { messages: newMessages } });
+      setMessages((m) => [...m, { role: "assistant", content: reply }]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { role: "assistant", content: "Sorry, I ran into an error connecting to my brain. Please try again." }]);
+    } finally {
+      setThinking(false);
+    }
   }
 
   return (
     <div className="mx-auto flex h-[calc(100vh-160px)] max-w-3xl flex-col">
       <header className="mb-4">
-        <h1 className="text-2xl font-black tracking-tight">Ask Zeta</h1>
+        <h1 className="text-2xl font-black tracking-tight">Ask AI Powered Meeting Companion</h1>
         <p className="text-sm text-muted-foreground">Semantic search across every meeting, decision and transcript.</p>
       </header>
 

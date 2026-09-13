@@ -1,21 +1,21 @@
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { ShieldCheck, Sparkles, User as UserIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/auth")({
-  head: () => ({ meta: [{ title: "Sign in — Zeta" }, { name: "description", content: "Sign in to Zeta and let AI handle your meetings." }] }),
+  head: () => ({ meta: [{ title: "Sign in — AI Powered Meeting Companion" }, { name: "description", content: "Sign in to AI Powered Meeting Companion and let AI handle your meetings." }] }),
   component: AuthPage,
 });
 
 function AuthPage() {
   const router = useRouter();
   const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
+  const [role, setRole] = useState<"student" | "admin">("student");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -26,14 +26,21 @@ function AuthPage() {
     supabase.auth.getSession().then(({ data }) => {
       if (mounted && data.session) router.navigate({ to: "/dashboard", replace: true });
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!mounted) return;
-      if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session) {
-        router.navigate({ to: "/dashboard", replace: true });
-      }
-    });
-    return () => { mounted = false; sub.subscription.unsubscribe(); };
+    return () => { mounted = false; };
   }, [router]);
+
+  async function verifyAdminAndRedirect(userId: string) {
+    const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", userId);
+    const isAdmin = (roles ?? []).some((r: any) => r.role === "admin");
+    
+    if (isAdmin) {
+      toast.success("Admin access granted.");
+      router.navigate({ to: "/admin/dashboard", replace: true });
+    } else {
+      toast.error("Access Denied: You are not an administrator.");
+      await supabase.auth.signOut();
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,13 +49,20 @@ function AuthPage() {
       if (mode === "signup") {
         const { error } = await supabase.auth.signUp({
           email, password,
-          options: { data: { full_name: name }, emailRedirectTo: window.location.origin + "/auth" },
+          options: { data: { full_name: name, role: role === "admin" ? "admin" : "user" }, emailRedirectTo: window.location.origin + "/auth" },
         });
         if (error) throw error;
         toast.success("Account created. You're signed in.");
+        router.navigate({ to: "/dashboard", replace: true });
       } else if (mode === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        
+        if (role === "admin" && data.user) {
+          await verifyAdminAndRedirect(data.user.id);
+        } else {
+          router.navigate({ to: "/dashboard", replace: true });
+        }
       } else {
         const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + "/reset-password" });
         if (error) throw error;
@@ -62,79 +76,86 @@ function AuthPage() {
     }
   }
 
-  async function google() {
-    setLoading(true);
-    try {
-      const result = await lovable.auth.signInWithOAuth("google", { redirect_uri: window.location.origin });
-      if (result.error) { toast.error(result.error.message); return; }
-      // If redirected, browser is leaving. If not, onAuthStateChange will navigate.
-    } catch (e: any) {
-      toast.error(e?.message || "Google sign-in failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  const isAdminMode = role === "admin";
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4 py-10">
+    <div className={`flex min-h-screen items-center justify-center px-4 py-10 transition-colors duration-500 ${isAdminMode ? 'bg-zinc-950' : ''}`}>
       <div className="w-full max-w-md">
         <Link to="/" className="mb-8 flex items-center justify-center gap-2">
-          <div className="gradient-bg grid h-10 w-10 place-items-center rounded-xl shadow-glow">
-            <Sparkles className="h-5 w-5 text-primary-foreground" />
+          <div className={`grid h-10 w-10 place-items-center rounded-xl shadow-glow ${isAdminMode ? 'bg-red-600' : 'gradient-bg'}`}>
+            {isAdminMode ? <ShieldCheck className="h-5 w-5 text-white" /> : <Sparkles className="h-5 w-5 text-primary-foreground" />}
           </div>
-          <span className="text-xl font-bold">Zeta</span>
+          <span className={`text-xl font-bold ${isAdminMode ? 'text-white' : ''}`}>AI Powered Meeting Companion</span>
         </Link>
 
-        <div className="glass rounded-3xl p-8 shadow-soft">
+        {(mode === "signin" || mode === "signup") && (
+          <div className="mb-6 flex rounded-lg bg-black/10 p-1">
+            <button
+              onClick={() => setRole("student")}
+              className={`flex-1 rounded-md py-2 text-sm font-medium transition-all flex items-center justify-center gap-2 ${role === "student" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <UserIcon className="h-4 w-4" /> Student {mode === "signin" ? "Login" : "Sign Up"}
+            </button>
+            <button
+              onClick={() => setRole("admin")}
+              className={`flex-1 rounded-md py-2 text-sm font-medium transition-all flex items-center justify-center gap-2 ${role === "admin" ? "bg-red-600 shadow text-white" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <ShieldCheck className="h-4 w-4" /> Admin {mode === "signin" ? "Login" : "Sign Up"}
+            </button>
+          </div>
+        )}
+
+        <div className={`glass rounded-3xl p-8 shadow-soft transition-all ${isAdminMode ? 'border-red-900/30 bg-zinc-900/50 text-white shadow-2xl backdrop-blur-xl' : ''}`}>
           <h1 className="text-2xl font-bold">
-            {mode === "signin" ? "Welcome back" : mode === "signup" ? "Create your account" : "Reset your password"}
+            {mode === "signin" 
+              ? (role === "admin" ? "Admin Portal" : "Welcome back") 
+              : mode === "signup" ? (role === "admin" ? "Create Admin Account" : "Create Student Account") : "Reset your password"}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {mode === "signin" ? "Sign in to your Zeta workspace" : mode === "signup" ? "Start automating your meetings" : "We'll email you a reset link"}
+          <p className={`mt-1 text-sm ${isAdminMode ? 'text-zinc-400' : 'text-muted-foreground'}`}>
+            {mode === "signin" 
+              ? (role === "admin" ? "Restricted access. Authorized personnel only." : "Sign in to your AI Powered Meeting Companion workspace") 
+              : mode === "signup" ? (role === "admin" ? "Register a new administrator" : "Start automating your meetings") : "We'll email you a reset link"}
           </p>
 
-          {mode !== "reset" && (
-            <>
-              <Button onClick={google} disabled={loading} variant="outline" className="glass mt-6 w-full gap-2 rounded-full border-white/10">
-                <GoogleIcon /> Continue with Google
-              </Button>
-              <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">
-                <div className="h-px flex-1 bg-white/10" /> or <div className="h-px flex-1 bg-white/10" />
-              </div>
-            </>
-          )}
-
-          <form onSubmit={submit} className="space-y-4">
+          <form onSubmit={submit} className="mt-6 space-y-4">
             {mode === "signup" && (
               <div>
-                <Label htmlFor="name">Full name</Label>
-                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required className="glass mt-1 border-white/10" />
+                <Label htmlFor="name" className={isAdminMode ? 'text-zinc-400' : ''}>Full name</Label>
+                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required className={`mt-1 ${isAdminMode ? 'border-white/10 bg-black/50 text-white focus:border-red-500' : 'glass border-white/10'}`} />
               </div>
             )}
             <div>
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="glass mt-1 border-white/10" />
+              <Label htmlFor="email" className={isAdminMode ? 'text-zinc-400' : ''}>Email</Label>
+              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className={`mt-1 ${isAdminMode ? 'border-white/10 bg-black/50 text-white focus:border-red-500' : 'glass border-white/10'}`} />
             </div>
             {mode !== "reset" && (
               <div>
-                <Label htmlFor="password">Password</Label>
-                <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} className="glass mt-1 border-white/10" />
+                <Label htmlFor="password" className={isAdminMode ? 'text-zinc-400' : ''}>Password</Label>
+                <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} className={`mt-1 ${isAdminMode ? 'border-white/10 bg-black/50 text-white focus:border-red-500' : 'glass border-white/10'}`} />
               </div>
             )}
-            <Button type="submit" disabled={loading} className="gradient-bg w-full rounded-full shadow-glow">
-              {loading ? "Please wait…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset link"}
+            
+            <Button 
+              type="submit" 
+              disabled={loading} 
+              className={`w-full rounded-full transition-all ${
+                isAdminMode 
+                  ? 'bg-red-600 hover:bg-red-700 text-white shadow-[0_0_15px_rgba(220,38,38,0.3)] font-bold tracking-wide mt-6' 
+                  : 'gradient-bg shadow-glow mt-6'
+              }`}
+            >
+              {loading ? "Please wait…" : mode === "signin" ? (role === "admin" ? "Authorize" : "Sign in") : mode === "signup" ? (role === "admin" ? "Create Admin" : "Create Account") : "Send reset link"}
             </Button>
           </form>
 
-          <div className="mt-6 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+          <div className="mt-6 flex flex-wrap justify-between gap-2 text-xs">
             {mode === "signin" ? (
               <>
-                <button onClick={() => setMode("reset")} className="hover:text-foreground">Forgot password?</button>
-                <button onClick={() => setMode("signup")} className="hover:text-foreground">Create account</button>
+                <button onClick={() => setMode("reset")} className={`${isAdminMode ? 'text-zinc-500 hover:text-white' : 'text-muted-foreground hover:text-foreground'}`}>Forgot password?</button>
+                <button onClick={() => { setMode("signup"); }} className={`${isAdminMode ? 'text-zinc-500 hover:text-white' : 'text-muted-foreground hover:text-foreground'}`}>Create account</button>
               </>
             ) : (
-              <button onClick={() => setMode("signin")} className="hover:text-foreground">← Back to sign in</button>
+              <button onClick={() => setMode("signin")} className={`${isAdminMode ? 'text-zinc-500 hover:text-white' : 'text-muted-foreground hover:text-foreground'}`}>← Back to sign in</button>
             )}
           </div>
         </div>
@@ -143,13 +164,4 @@ function AuthPage() {
   );
 }
 
-function GoogleIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.4 29.3 35.5 24 35.5c-6.4 0-11.5-5.1-11.5-11.5S17.6 12.5 24 12.5c2.9 0 5.6 1.1 7.6 2.9l5.7-5.7C33.9 6.6 29.2 4.5 24 4.5 13.2 4.5 4.5 13.2 4.5 24S13.2 43.5 24 43.5 43.5 34.8 43.5 24c0-1.2-.1-2.4-.3-3.5z"/>
-      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.7 18.9 12.5 24 12.5c2.9 0 5.6 1.1 7.6 2.9l5.7-5.7C33.9 6.6 29.2 4.5 24 4.5 16.3 4.5 9.7 8.9 6.3 14.7z"/>
-      <path fill="#4CAF50" d="M24 43.5c5.1 0 9.7-2 13.2-5.2l-6.1-5c-2 1.4-4.4 2.2-7.1 2.2-5.3 0-9.7-3.1-11.3-7.4l-6.5 5C9.6 39.1 16.2 43.5 24 43.5z"/>
-      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.1-4.1 5.4l6.1 5c-.4.4 6.7-4.9 6.7-14.4 0-1.2-.1-2.4-.4-3.5z"/>
-    </svg>
-  );
-}
+

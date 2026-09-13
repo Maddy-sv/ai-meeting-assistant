@@ -13,7 +13,7 @@ export async function seedIfEmpty(userId: string) {
 
   const meetings = [
     {
-      host_id: userId, title: "Product Sync — Zeta Dashboard", platform: "google_meet",
+      host_id: userId, title: "Product Sync — AI Powered Meeting Companion Dashboard", platform: "google_meet",
       meeting_link: "https://meet.google.com/abc-defg-hij",
       scheduled_at: soon.toISOString(), status: "upcoming",
     },

@@ -1,12 +1,12 @@
-# Zeta Meet AI
+# AI Powered Meeting Companion Meet AI
 
 Prompt for Loveable AI
 
-Build a modern, production-style SaaS web application called Zeta – AI-Powered Meeting Intelligence Platform.
+Build a modern, production-style SaaS web application called AI Powered Meeting Companion – AI-Powered Meeting Intelligence Platform.
 
 Overview
 
-Zeta is an AI-powered workspace that helps users automatically record, transcribe, summarize, organize, and search online meetings. The platform should have a clean, professional UI inspired by Notion, Slack, and Linear, with a responsive design, smooth animations, and a premium appearance.
+AI Powered Meeting Companion is an AI-powered workspace that helps users automatically record, transcribe, summarize, organize, and search online meetings. The platform should have a clean, professional UI inspired by Notion, Slack, and Linear, with a responsive design, smooth animations, and a premium appearance.
 
 ---
 
@@ -15,8 +15,8 @@ Landing Page
 Create a beautiful landing page that includes:
 
 - Hero section with the title:
-  "Zeta – The Complete AI Workspace for Your Meetings"
-- Subtitle explaining that Zeta automatically transcribes, summarizes, and organizes meetings.
+  "AI Powered Meeting Companion – The Complete AI Workspace for Your Meetings"
+- Subtitle explaining that AI Powered Meeting Companion automatically transcribes, summarizes, and organizes meetings.
 - Buttons:
   - Get Started
   - Watch Demo
@@ -135,7 +135,7 @@ Users can ask questions such as:
 - What decisions were made?
 - Who is responsible for Task A?
 - Show meetings about authentication.
-- Show discussions related to the Zeta Dashboard.
+- Show discussions related to the AI Powered Meeting Companion Dashboard.
 
 The chatbot should answer using stored meeting transcripts.
 

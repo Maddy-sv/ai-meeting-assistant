@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Sparkles } from "lucide-react";
 
 export const Route = createFileRoute("/reset-password")({
-  head: () => ({ meta: [{ title: "Reset password — Zeta" }] }),
+  head: () => ({ meta: [{ title: "Reset password — AI Powered Meeting Companion" }] }),
   component: ResetPassword,
 });
 
@@ -36,7 +36,7 @@ function ResetPassword() {
       <div className="glass w-full max-w-md rounded-3xl p-8 shadow-soft">
         <div className="mb-6 flex items-center justify-center gap-2">
           <div className="gradient-bg grid h-10 w-10 place-items-center rounded-xl"><Sparkles className="h-5 w-5 text-primary-foreground" /></div>
-          <span className="text-xl font-bold">Zeta</span>
+          <span className="text-xl font-bold">AI Powered Meeting Companion</span>
         </div>
         <h1 className="text-2xl font-bold">Set a new password</h1>
         <form onSubmit={submit} className="mt-6 space-y-4">

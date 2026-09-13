@@ -20,7 +20,7 @@ export type Database = {
           created_at: string
           deadline: string | null
           id: string
-          meeting_id: string
+          meeting_id: string | null
           status: string
           title: string
         }
@@ -29,7 +29,7 @@ export type Database = {
           created_at?: string
           deadline?: string | null
           id?: string
-          meeting_id: string
+          meeting_id?: string | null
           status?: string
           title: string
         }
@@ -127,6 +127,7 @@ export type Database = {
           created_at: string
           duration_seconds: number | null
           ended_at: string | null
+          google_event_id: string | null
           host_id: string
           id: string
           meeting_link: string | null
@@ -141,6 +142,7 @@ export type Database = {
           created_at?: string
           duration_seconds?: number | null
           ended_at?: string | null
+          google_event_id?: string | null
           host_id: string
           id?: string
           meeting_link?: string | null
@@ -155,6 +157,7 @@ export type Database = {
           created_at?: string
           duration_seconds?: number | null
           ended_at?: string | null
+          google_event_id?: string | null
           host_id?: string
           id?: string
           meeting_link?: string | null

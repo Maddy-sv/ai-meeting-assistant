@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { CheckCircle2, Mail } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/profile")({
-  head: () => ({ meta: [{ title: "Profile — Zeta" }] }),
+  head: () => ({ meta: [{ title: "Profile — AI Powered Meeting Companion" }] }),
   component: ProfilePage,
 });
 
