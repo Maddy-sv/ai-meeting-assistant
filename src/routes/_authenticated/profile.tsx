@@ -26,19 +26,66 @@ function ProfilePage() {
       if (!u.user) return;
       setEmail(u.user.email ?? "");
       const { data } = await supabase.from("profiles").select("*").eq("id", u.user.id).maybeSingle();
-      setP(data as Profile | null);
+      if (data) {
+        setP(data as Profile);
+      } else {
+        const meta = u.user.user_metadata as any;
+        const initialProfile: Profile = {
+          id: u.user.id,
+          full_name: meta?.full_name || meta?.name || u.user.email?.split("@")[0] || "",
+          avatar_url: meta?.avatar_url || null,
+          company: meta?.company || "",
+          time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+          language: "en",
+          subscription_plan: "free"
+        };
+        setP(initialProfile);
+        supabase.from("profiles").upsert({
+          id: initialProfile.id,
+          full_name: initialProfile.full_name,
+          company: initialProfile.company,
+          time_zone: initialProfile.time_zone,
+          language: initialProfile.language,
+        }).then(() => {});
+      }
     })();
   }, []);
 
   async function save() {
     if (!p) return;
     setSaving(true);
-    const { error } = await supabase.from("profiles").update({
-      full_name: p.full_name, company: p.company, time_zone: p.time_zone, language: p.language,
-    }).eq("id", p.id);
-    setSaving(false);
-    if (error) return toast.error(error.message);
-    toast.success("Profile updated");
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const userId = u.user?.id || p.id;
+
+      // 1. Upsert into database
+      const { error: pErr } = await supabase.from("profiles").upsert({
+        id: userId,
+        full_name: p.full_name,
+        company: p.company,
+        time_zone: p.time_zone,
+        language: p.language,
+        updated_at: new Date().toISOString()
+      });
+
+      if (pErr) throw pErr;
+
+      // 2. Sync to auth metadata so session and sidebar stay updated
+      await supabase.auth.updateUser({
+        data: {
+          full_name: p.full_name,
+          name: p.full_name,
+          company: p.company,
+        }
+      });
+
+      toast.success("Profile saved successfully");
+    } catch (err: any) {
+      console.error("Profile update error:", err);
+      toast.error(err?.message || "Failed to update profile");
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (!p) return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -58,7 +105,6 @@ function ProfilePage() {
           <div className="truncate text-lg font-semibold">{p.full_name || "Unnamed"}</div>
           <div className="truncate text-sm text-muted-foreground">{email}</div>
         </div>
-        <Badge className="gradient-bg">{p.subscription_plan.toUpperCase()}</Badge>
       </div>
 
       <div className="glass grid gap-4 rounded-2xl p-6 md:grid-cols-2">
@@ -89,12 +135,6 @@ function ProfilePage() {
           <Row icon={<Mail className="h-4 w-4" />} name="Google" desc="Sign-in, Calendar, Gmail" connected />
           <Row icon={<Mail className="h-4 w-4" />} name="Microsoft" desc="Teams integration" />
         </div>
-      </div>
-
-      <div className="glass rounded-2xl p-6">
-        <h3 className="mb-1 font-semibold">Subscription</h3>
-        <p className="text-sm text-muted-foreground">You're on the {p.subscription_plan.toUpperCase()} plan.</p>
-        <Button className="gradient-bg mt-4 rounded-full">Upgrade to Pro</Button>
       </div>
     </div>
   );

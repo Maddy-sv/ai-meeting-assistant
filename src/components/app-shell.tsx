@@ -38,17 +38,34 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => { setMobileMenuOpen(false); }, [pathname]);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      setEmail(data.user?.email ?? "");
-      const meta = data.user?.user_metadata as { full_name?: string; name?: string } | undefined;
-      setName(meta?.full_name || meta?.name || (data.user?.email?.split("@")[0] ?? ""));
-      
+    async function loadUser() {
+      const { data } = await supabase.auth.getUser();
       if (data.user) {
+        setEmail(data.user.email ?? "");
+        const meta = data.user.user_metadata as { full_name?: string; name?: string } | undefined;
+        let displayName = meta?.full_name || meta?.name || (data.user.email?.split("@")[0] ?? "");
+        
+        const { data: prof } = await supabase.from("profiles").select("full_name").eq("id", data.user.id).maybeSingle();
+        if ((prof as any)?.full_name) {
+          displayName = (prof as any).full_name;
+        }
+        setName(displayName);
+
         supabase.from("user_roles").select("role").eq("user_id", data.user.id).then(({ data: roles }) => {
           setIsAdmin((roles ?? []).some((r: any) => r.role === "admin"));
         });
       }
+    }
+
+    loadUser();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(() => {
+      loadUser();
     });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   async function signOut() {

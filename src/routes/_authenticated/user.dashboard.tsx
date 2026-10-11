@@ -24,17 +24,32 @@ function UserDashboard() {
       const { data: u } = await supabase.auth.getUser();
       if (!u.user) return;
       
+      const { data: prof } = await supabase.from("profiles").select("full_name").eq("id", u.user.id).maybeSingle();
       const meta = u.user.user_metadata;
-      const fName = meta?.full_name || meta?.name || u.user.email?.split("@")[0] || "";
-      setName(fName.split(" ")[0]);
+      const fullName = (prof?.full_name || meta?.full_name || meta?.name || u.user.email?.split("@")[0] || "").trim();
+      const firstName = fullName.split(" ")[0].trim();
+      setName(firstName || "there");
 
-      const firstName = fName.split(" ")[0];
       const [{ data: m }, { data: a }] = await Promise.all([
         supabase.from("meetings").select("*").order("scheduled_at", { ascending: true }),
-        supabase.from("action_items").select("*").eq("status", "pending").ilike("assignee", `%${firstName}%`).order("deadline", { ascending: true }),
+        supabase.from("action_items").select("*").eq("status", "pending").order("deadline", { ascending: true }),
       ]);
-      setMeetings((m as Meeting[]) ?? []);
-      setActions((a as ActionItem[]) ?? []);
+
+      const meetingList = (m as Meeting[]) ?? [];
+      const userMeetingIds = new Set(meetingList.filter(meeting => meeting.host_id === u.user.id).map(meeting => meeting.id));
+
+      const filteredActions = ((a as ActionItem[]) ?? []).filter(item => {
+        if (item.meeting_id && userMeetingIds.has(item.meeting_id)) return true;
+        const assignee = (item.assignee || "").toLowerCase().trim();
+        if (!assignee) return true;
+        if (["you", "host", "me", "i", "myself", "current user"].includes(assignee)) return true;
+        if (firstName && assignee.includes(firstName.toLowerCase())) return true;
+        if (fullName && assignee.includes(fullName.toLowerCase())) return true;
+        return false;
+      });
+
+      setMeetings(meetingList);
+      setActions(filteredActions);
       setLoading(false);
     })();
   }, []);
