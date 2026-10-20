@@ -90,6 +90,55 @@ export function speakerTone(name: string | null | undefined, isHost: boolean): s
   return SPEAKER_TONES[Math.abs(hash) % SPEAKER_TONES.length];
 }
 
+export const REMOTE_PARTICIPANT_LABEL = "Remote Participant";
+
+const GENERIC_SPEAKERS = new Set([
+  "remote",
+  "remote participant",
+  "remote speaker",
+  "unknown",
+  "unknown speaker",
+  "speaker",
+  "participant",
+]);
+
+export function isGenericRemote(name?: string | null): boolean {
+  return GENERIC_SPEAKERS.has((name ?? "").trim().toLowerCase());
+}
+
+export function firstName(name?: string | null): string {
+  return (name ?? "").trim().split(/\s+/)[0] ?? "";
+}
+
+export function friendlyAiError(err: unknown, fallback: string): string {
+  const msg = errorMessage(err, fallback);
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes("api key not valid") ||
+    lower.includes("api_key_invalid") ||
+    lower.includes("unauthenticated") ||
+    lower.includes("invalid authentication credentials")
+  ) {
+    return "Invalid Gemini API key. Ask the administrator to set a valid GEMINI_API_KEY from Google AI Studio.";
+  }
+  if (
+    lower.includes("429") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("rate-limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("please retry in")
+  ) {
+    return "AI rate limit reached. The request was retried automatically. Please wait a few seconds and click Retry.";
+  }
+  if (lower.includes("503") || lower.includes("overloaded") || lower.includes("high demand")) {
+    return "The AI model is currently experiencing high demand. Please try again in a few moments.";
+  }
+  if (lower.includes("failed to fetch") || lower.includes("networkerror")) {
+    return "Could not reach the server. Check your connection and click Retry.";
+  }
+  return msg;
+}
+
 export function isSameName(a?: string | null, b?: string | null): boolean {
   return !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
 }
@@ -126,6 +175,15 @@ export function formatTranscripts(
         .map((t) => `[${formatTime(t.spoken_at)}] ${t.speaker}: ${t.content}`)
         .join("\n");
   }
+}
+
+export function downloadTranscript(meeting: Meeting | null, transcripts: Transcript[]): boolean {
+  if (transcripts.length === 0) return false;
+  downloadTextFile(
+    `${meeting?.title || "meeting"}-transcript.txt`,
+    formatTranscripts(transcripts, "formatted", meeting),
+  );
+  return true;
 }
 
 export function downloadTextFile(filename: string, text: string) {

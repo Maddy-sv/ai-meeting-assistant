@@ -17,6 +17,8 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+export type ShareResult = { ok: boolean; audio: boolean };
+
 export function useScreenShareCapture(options: {
   onAudioChunk: (dataUrl: string) => void | Promise<unknown>;
   isPaused: () => boolean;
@@ -104,14 +106,16 @@ export function useScreenShareCapture(options: {
     }, CHUNK_MS);
   }, []);
 
-  const start = useCallback(async (): Promise<boolean> => {
-    if (streamRef.current) return true;
-    if (!navigator.mediaDevices?.getDisplayMedia) return false;
+  const start = useCallback(async (): Promise<ShareResult> => {
+    if (streamRef.current) {
+      return { ok: true, audio: streamRef.current.getAudioTracks().length > 0 };
+    }
+    if (!navigator.mediaDevices?.getDisplayMedia) return { ok: false, audio: false };
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
     } catch {
-      return false;
+      return { ok: false, audio: false };
     }
     streamRef.current = stream;
     activeRef.current = true;
@@ -171,7 +175,7 @@ export function useScreenShareCapture(options: {
     }, SCREENSHOT_MS);
 
     stream.getVideoTracks()[0]?.addEventListener("ended", () => void stop());
-    return true;
+    return { ok: true, audio: audioTracks.length > 0 };
   }, [recordClip, stop]);
 
   const getScreenshots = useCallback(() => screenshotsRef.current, []);

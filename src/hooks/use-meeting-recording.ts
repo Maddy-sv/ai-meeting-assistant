@@ -4,15 +4,18 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { transcribeRemoteAudio } from "@/lib/ai.functions";
 import type { Transcript } from "@/components/meeting/types";
-import { errorMessage, isSameName, mutationError } from "@/components/meeting/utils";
+import {
+  REMOTE_PARTICIPANT_LABEL,
+  friendlyAiError,
+  isGenericRemote,
+  isSameName,
+  mutationError,
+} from "@/components/meeting/utils";
 import type { MeetingData } from "./use-meeting-data";
 import { useLiveTranscription } from "./use-meeting-live-transcription";
-import { useScreenShareCapture } from "./use-meeting-screen-capture";
+import { useScreenShareCapture, type ShareResult } from "./use-meeting-screen-capture";
 
 const REMOTE_OVERLAP_MS = 4_500;
-const REMOTE_FALLBACK_LABEL = "Remote participant";
-
-type RemoteSegment = { speaker: string; content: string; spoken_at?: string };
 
 export function useMeetingRecording(
   data: MeetingData,
@@ -70,8 +73,9 @@ export function useMeetingRecording(
   }
 
   function remoteSpeakerName() {
-    const remote = dataRef.current.participants.find((p) => !isSameName(p.name, hostName));
-    return remote?.name || REMOTE_FALLBACK_LABEL;
+    const others = dataRef.current.participants.filter((p) => !isSameName(p.name, hostName));
+    const named = others.find((p) => !isGenericRemote(p.name));
+    return named?.name || others[0]?.name || REMOTE_PARTICIPANT_LABEL;
   }
 
   const live = useLiveTranscription({
@@ -88,7 +92,7 @@ export function useMeetingRecording(
     isPaused: () => live.paused,
     onAudioChunk: async (dataUrl: string) => {
       try {
-        const res = (await transcribeRemote({
+        const res = await transcribeRemote({
           data: {
             meetingId,
             base64Audio: dataUrl,
@@ -99,15 +103,25 @@ export function useMeetingRecording(
             ),
             hostName,
           },
-        })) as RemoteSegment[] | null;
-        if (!Array.isArray(res) || res.length === 0) return;
-        for (const seg of res) {
+        });
+        if (!res) return;
+        const { renamed } = res;
+        if (renamed) {
+          setTranscripts((prev) =>
+            prev.map((t) =>
+              isGenericRemote(t.speaker) || isSameName(t.speaker, renamed.from)
+                ? { ...t, speaker: renamed.to }
+                : t,
+            ),
+          );
+          toast.success(`Renamed ${renamed.from} to ${renamed.to} across all chat bubbles!`);
+        }
+        for (const seg of res.segments) {
           if (seg.content?.trim()) await persistSegment(seg.speaker, seg.content.trim());
         }
-
         await dataRef.current.reloadParticipants();
       } catch (err) {
-        toast.error(errorMessage(err, "Remote audio could not be transcribed."), {
+        toast.error(friendlyAiError(err, "Remote audio could not be transcribed."), {
           id: "remote-transcription-error",
         });
       }
@@ -123,12 +137,33 @@ export function useMeetingRecording(
     else await dataRef.current.reloadParticipants();
   }
 
+  function reportShare(result: ShareResult, automatic: boolean) {
+    if (!result.ok) {
+      if (automatic) {
+        toast.info(
+          "Screen sharing was skipped. Use Share call tab audio to transcribe remote participants.",
+        );
+      } else {
+        toast.error("Screen sharing was cancelled or is not available in this browser.");
+      }
+      return;
+    }
+    if (result.audio) {
+      toast.success("Screen & Tab Audio synced. Remote participants will be transcribed.");
+    } else {
+      toast.warning(
+        "Screen shared without tab audio. Share again and tick Share tab audio to hear remote participants.",
+      );
+    }
+  }
+
   async function startRecording() {
     const result = await live.start();
     if (!result.ok) {
       toast.error(result.reason);
       return;
     }
+    const share = screen.start();
     const startedAt = meeting?.started_at || new Date().toISOString();
     const problem = mutationError(
       await supabase
@@ -140,21 +175,18 @@ export function useMeetingRecording(
     );
     if (problem) {
       live.stop();
+      void share.then(() => screen.stop());
       toast.error(problem);
       return;
     }
     setMeeting((m) => (m ? { ...m, status: "live", started_at: startedAt } : m));
     await ensureHostParticipant();
-    toast.success("Recording started.");
+    toast.success("Recording started. AI is listening.");
+    reportShare(await share, true);
   }
 
   async function shareTabAudio() {
-    const ok = await screen.start();
-    if (!ok) {
-      toast.error("Screen sharing was cancelled or is not available in this browser.");
-      return;
-    }
-    toast.success("Sharing started. Remote voices from the shared tab will be transcribed.");
+    reportShare(await screen.start(), false);
   }
 
   function stopCapture(): Promise<unknown> {

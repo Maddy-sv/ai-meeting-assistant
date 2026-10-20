@@ -894,12 +894,60 @@ const TranscribeInput = z.object({
   hostName: z.string().max(200).optional(),
 });
 
-const PLACEHOLDER_SPEAKERS = new Set(["remote", "remote participant", "unknown", "speaker"]);
+const REMOTE_PARTICIPANT_LABEL = "Remote Participant";
+const PLACEHOLDER_SPEAKERS = new Set([
+  "remote",
+  "remote participant",
+  "remote speaker",
+  "unknown",
+  "unknown speaker",
+  "speaker",
+  "participant",
+]);
+const SELF_SPEAKERS = new Set(["you", "host", "me"]);
+
+function isPlaceholderSpeaker(name: string | null | undefined): boolean {
+  return PLACEHOLDER_SPEAKERS.has((name ?? "").trim().toLowerCase());
+}
+
+type Client = Parameters<typeof requireOwnedMeeting>[0];
+
+async function relabelPlaceholderLines(
+  supabase: Client,
+  meetingId: string,
+  name: string,
+): Promise<number> {
+  const { data: rows, error } = await supabase
+    .from("transcripts")
+    .select("id, speaker")
+    .eq("meeting_id", meetingId);
+  if (error) fail("load transcript speakers", error, "Could not update the transcript speakers.");
+  const ids = (rows ?? []).filter((r) => isPlaceholderSpeaker(r.speaker)).map((r) => r.id);
+  if (ids.length === 0) return 0;
+  const { error: upErr } = await supabase
+    .from("transcripts")
+    .update({ speaker: name })
+    .in("id", ids);
+  if (upErr) fail("relabel transcript", upErr, "Could not update the transcript speakers.");
+  return ids.length;
+}
+
+export type RemoteTranscription = {
+  segments: Array<{
+    meeting_id: string;
+    speaker: string;
+    content: string;
+    segment_index: number;
+    spoken_at: string;
+    status: "partial";
+  }>;
+  renamed: { from: string; to: string } | null;
+};
 
 export const transcribeRemoteAudio = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: z.input<typeof TranscribeInput>) => parseInput(TranscribeInput, input))
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data, context }): Promise<RemoteTranscription | null> => {
     const { supabase, userId } = context;
     const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
     const [hostName, existingNames] = await Promise.all([
@@ -936,41 +984,73 @@ export const transcribeRemoteAudio = createServerFn({ method: "POST" })
     );
     const segments = parsed
       .map((s) => ({
-        speaker: (s.speaker ?? "").trim().slice(0, 100) || "Remote Participant",
+        speaker: (s.speaker ?? "").trim().slice(0, 100) || REMOTE_PARTICIPANT_LABEL,
         content: (s.text ?? "").trim().slice(0, 5000),
       }))
       .filter((s) => s.content.length > 1);
     if (segments.length === 0) return null;
 
+    const isHostName = (name: string) => name.toLowerCase() === hostName.toLowerCase();
     const known = new Set(existingNames.map((n) => n.toLowerCase()));
     const newNames: string[] = [];
     for (const s of segments) {
       const key = s.speaker.toLowerCase();
-      if (!known.has(key) && !PLACEHOLDER_SPEAKERS.has(key)) {
+      if (!known.has(key) && !PLACEHOLDER_SPEAKERS.has(key) && !SELF_SPEAKERS.has(key)) {
         known.add(key);
         newNames.push(s.speaker);
       }
     }
+
+    let renamed: RemoteTranscription["renamed"] = null;
+    const firstRemote = newNames.find((n) => !isHostName(n));
+    if (firstRemote) {
+      const { data: rows, error: pErr } = await supabase
+        .from("participants")
+        .select("id, name")
+        .eq("meeting_id", meeting.id);
+      if (pErr) fail("load participants", pErr, "Could not load the meeting participants.");
+      const generic = (rows ?? []).find((p) => isPlaceholderSpeaker(p.name));
+      const realRemotes = (rows ?? []).filter(
+        (p) => !isPlaceholderSpeaker(p.name) && !isHostName(p.name),
+      );
+      if (generic) {
+        const { error } = await supabase
+          .from("participants")
+          .update({ name: firstRemote, role: "participant" })
+          .eq("id", generic.id);
+        if (error) fail("rename participant", error, "Could not rename the remote participant.");
+        await relabelPlaceholderLines(supabase, meeting.id, firstRemote);
+        renamed = { from: generic.name, to: firstRemote };
+        newNames.splice(newNames.indexOf(firstRemote), 1);
+      } else if (realRemotes.length === 0) {
+        const count = await relabelPlaceholderLines(supabase, meeting.id, firstRemote);
+        if (count > 0) renamed = { from: REMOTE_PARTICIPANT_LABEL, to: firstRemote };
+      }
+    }
+
     if (newNames.length > 0) {
       const { error } = await supabase.from("participants").insert(
         newNames.map((name) => ({
           meeting_id: meeting.id,
           name,
-          role: name.toLowerCase() === hostName.toLowerCase() ? "host" : "participant",
+          role: isHostName(name) ? "host" : "participant",
         })),
       );
       if (error) fail("add participants", error, "Could not save the new participants.");
     }
 
     const spokenAt = new Date().toISOString();
-    return segments.map((s) => ({
-      meeting_id: meeting.id,
-      speaker: s.speaker,
-      content: s.content,
-      segment_index: data.segmentIndex,
-      spoken_at: spokenAt,
-      status: "partial" as const,
-    }));
+    return {
+      renamed,
+      segments: segments.map((s) => ({
+        meeting_id: meeting.id,
+        speaker: renamed && isPlaceholderSpeaker(s.speaker) ? renamed.to : s.speaker,
+        content: s.content,
+        segment_index: data.segmentIndex,
+        spoken_at: spokenAt,
+        status: "partial" as const,
+      })),
+    };
   });
 
 const CleanInput = z.object({
@@ -1073,7 +1153,26 @@ export const cleanAndAlignTranscripts = createServerFn({ method: "POST" })
       }
     }
 
-    return { success: true as const, transcripts: inserted ?? [] };
+    const knownNames = new Set(participants.map((n) => n.toLowerCase()));
+    const addedSpeakers: string[] = [];
+    for (const c of cleaned) {
+      const key = c.speaker.toLowerCase();
+      if (knownNames.has(key) || PLACEHOLDER_SPEAKERS.has(key) || SELF_SPEAKERS.has(key)) continue;
+      knownNames.add(key);
+      addedSpeakers.push(c.speaker);
+    }
+    if (addedSpeakers.length > 0) {
+      const { error: pErr } = await supabase.from("participants").insert(
+        addedSpeakers.map((name) => ({
+          meeting_id: meeting.id,
+          name,
+          role: name.toLowerCase() === hostName.toLowerCase() ? "host" : "participant",
+        })),
+      );
+      if (pErr) console.error("[db] add transcript speakers:", pErr.message);
+    }
+
+    return { success: true as const, transcripts: inserted ?? [], addedSpeakers };
   });
 
 const statusSchema = z.preprocess(
