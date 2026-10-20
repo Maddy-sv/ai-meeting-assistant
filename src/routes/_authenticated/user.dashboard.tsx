@@ -1,4 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState, type ComponentType } from "react";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { endOfDay, endOfWeek, format, isToday, startOfDay } from "date-fns";
 import {
@@ -9,12 +10,12 @@ import {
   CheckCircle2,
   Clock,
   ExternalLink,
+  FileText,
   ListChecks,
-  MessageSquare,
+  LogIn,
   Sparkles,
   Video,
 } from "lucide-react";
-import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -27,6 +28,7 @@ import {
   StatusBadge,
 } from "@/components/layout";
 import { useUnreadNotificationCount } from "@/components/layout/notifications";
+import { ScheduleMeetingDialog } from "@/components/schedule/schedule-meeting-dialog";
 import { useDisplayName, useUser } from "@/lib/auth";
 import { normalizeMeetingStatus } from "@/components/layout/status";
 
@@ -84,9 +86,9 @@ async function loadDashboard(userId: string): Promise<DashboardData> {
 
 function greeting(date = new Date()) {
   const h = date.getHours();
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
+  if (h < 12) return "Good Morning";
+  if (h < 18) return "Good Afternoon";
+  return "Good Evening";
 }
 
 function formatDuration(seconds: number | null) {
@@ -116,6 +118,8 @@ function UserDashboard() {
     enabled: !!user,
   });
   const unread = useUnreadNotificationCount();
+  const router = useRouter();
+  const [dialog, setDialog] = useState<"start" | "schedule" | null>(null);
 
   const now = new Date();
   const meetings = dashboard.data?.meetings ?? [];
@@ -163,6 +167,10 @@ function UserDashboard() {
     )
     .slice(0, 5);
 
+  const joinTarget = upcoming.find((m) => safeMeetingLink(m.meeting_link));
+  const joinLink = joinTarget ? safeMeetingLink(joinTarget.meeting_link) : null;
+  const openTasks = dashboard.data?.openTasks ?? 0;
+
   return (
     <div className="space-y-8 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-500">
       <header className="space-y-2">
@@ -171,14 +179,87 @@ function UserDashboard() {
         </p>
         <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
           {greeting(now)}
-          {firstName ? `, ${firstName}` : ""}
+          {firstName ? `, ${firstName}` : ""} <span aria-hidden>👋</span>
         </h1>
         <p className="text-muted-foreground">
-          Your meetings, summaries and action items in one place.
+          Manage your meetings, summaries and action items all in one place.
         </p>
       </header>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+      <section
+        aria-labelledby="ai-insight-heading"
+        className="glass flex flex-col justify-between gap-4 rounded-3xl border border-primary/20 bg-primary/5 p-6 shadow-glow md:flex-row md:items-center"
+      >
+        <div className="flex items-start gap-4">
+          <div className="gradient-bg grid h-12 w-12 shrink-0 place-items-center rounded-2xl">
+            <Sparkles className="h-6 w-6 text-primary-foreground" aria-hidden />
+          </div>
+          <div>
+            <h2 id="ai-insight-heading" className="text-lg font-bold">
+              AI Meeting Insight
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground" aria-live="polite">
+              {dashboard.isLoading
+                ? "Checking your action items…"
+                : dashboard.isError
+                  ? "Your action items could not be loaded right now."
+                  : openTasks > 0
+                    ? `${openTasks} action ${openTasks === 1 ? "item was" : "items were"} identified from your recent meetings. Stay on top of them!`
+                    : "You are completely caught up! No pending action items identified."}
+            </p>
+          </div>
+        </div>
+        <Button asChild variant="glass" className="shrink-0">
+          <Link to="/todo">
+            View Tasks <ArrowRight />
+          </Link>
+        </Button>
+      </section>
+
+      <nav aria-label="Quick actions" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <QuickTile icon={Video} label="Start New Meeting" onClick={() => setDialog("start")} />
+        <QuickTile
+          icon={CalendarPlus}
+          label="Schedule Meeting"
+          onClick={() => setDialog("schedule")}
+        />
+        {joinLink && joinTarget ? (
+          <a href={joinLink} target="_blank" rel="noopener noreferrer" className={QUICK_TILE_CLASS}>
+            <LogIn className="h-8 w-8 text-primary" aria-hidden />
+            <span className="text-sm font-semibold leading-tight">Join Meeting</span>
+            <span className="max-w-full truncate text-xs text-muted-foreground">
+              {joinTarget.title}
+            </span>
+          </a>
+        ) : (
+          <Link to="/meetings" className={QUICK_TILE_CLASS}>
+            <LogIn className="h-8 w-8 text-primary" aria-hidden />
+            <span className="text-sm font-semibold leading-tight">Join Meeting</span>
+          </Link>
+        )}
+        <Link to="/meetings" search={{ status: "completed" }} className={QUICK_TILE_CLASS}>
+          <FileText className="h-8 w-8 text-primary" aria-hidden />
+          <span className="text-sm font-semibold leading-tight">View Summaries</span>
+        </Link>
+      </nav>
+
+      <ScheduleMeetingDialog
+        open={dialog !== null}
+        onOpenChange={(open) => !open && setDialog(null)}
+        title={dialog === "start" ? "Start a new meeting" : "Schedule a meeting"}
+        allowStartNow={dialog === "start"}
+        onCreated={(m) => {
+          if (dialog === "start") router.navigate({ to: "/meetings/$id", params: { id: m.id } });
+        }}
+      />
+
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <StatTile
+          label="Total meetings"
+          icon={Video}
+          loading={dashboard.isLoading}
+          value={meetings.length}
+        />
         <StatTile
           label="Meetings today"
           icon={CalendarDays}
@@ -195,7 +276,7 @@ function UserDashboard() {
           label="Open tasks"
           icon={ListChecks}
           loading={dashboard.isLoading}
-          value={dashboard.data?.openTasks ?? 0}
+          value={openTasks}
         />
         <StatTile
           label="Summaries"
@@ -210,29 +291,6 @@ function UserDashboard() {
           value={unread.isError ? "—" : (unread.data ?? 0)}
         />
       </div>
-
-      <nav aria-label="Quick actions" className="flex flex-wrap gap-2">
-        <Button asChild variant="brand">
-          <Link to="/meetings">
-            <Video /> New meeting
-          </Link>
-        </Button>
-        <Button asChild variant="glass">
-          <Link to="/calendar">
-            <CalendarPlus /> Schedule
-          </Link>
-        </Button>
-        <Button asChild variant="glass">
-          <Link to="/todo">
-            <ListChecks /> Tasks
-          </Link>
-        </Button>
-        <Button asChild variant="glass">
-          <Link to="/chat">
-            <MessageSquare /> Ask about your meetings
-          </Link>
-        </Button>
-      </nav>
 
       {dashboard.isLoading && <LoadingState variant="cards" rows={3} label="Loading meetings…" />}
 
@@ -343,6 +401,26 @@ function UserDashboard() {
         </div>
       )}
     </div>
+  );
+}
+
+const QUICK_TILE_CLASS =
+  "glass flex flex-col items-center justify-center gap-2 rounded-3xl p-6 text-center shadow-soft transition hover:shadow-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-safe:hover:-translate-y-0.5";
+
+function QuickTile({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" onClick={onClick} className={QUICK_TILE_CLASS}>
+      <Icon className="h-8 w-8 text-primary" aria-hidden />
+      <span className="text-sm font-semibold leading-tight">{label}</span>
+    </button>
   );
 }
 
