@@ -11,30 +11,39 @@ export type Database = {
       action_items: {
         Row: {
           assignee: string | null;
+          assignee_user_id: string | null;
+          canonical_key: string | null;
           created_at: string;
           deadline: string | null;
           id: string;
-          meeting_id: string | null;
+          meeting_id: string;
           status: string;
           title: string;
+          updated_at: string;
         };
         Insert: {
           assignee?: string | null;
+          assignee_user_id?: string | null;
+          canonical_key?: string | null;
           created_at?: string;
           deadline?: string | null;
           id?: string;
-          meeting_id?: string | null;
+          meeting_id: string;
           status?: string;
           title: string;
+          updated_at?: string;
         };
         Update: {
           assignee?: string | null;
+          assignee_user_id?: string | null;
+          canonical_key?: string | null;
           created_at?: string;
           deadline?: string | null;
           id?: string;
           meeting_id?: string;
           status?: string;
           title?: string;
+          updated_at?: string;
         };
         Relationships: [
           {
@@ -84,6 +93,60 @@ export type Database = {
           },
         ];
       };
+      ai_usage: {
+        Row: {
+          created_at: string;
+          duration_ms: number | null;
+          fn: string;
+          id: string;
+          model: string | null;
+          ok: boolean;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          duration_ms?: number | null;
+          fn: string;
+          id?: string;
+          model?: string | null;
+          ok?: boolean;
+          user_id?: string;
+        };
+        Update: {
+          created_at?: string;
+          duration_ms?: number | null;
+          fn?: string;
+          id?: string;
+          model?: string | null;
+          ok?: boolean;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      chat_messages: {
+        Row: {
+          content: string;
+          created_at: string;
+          id: string;
+          role: string;
+          user_id: string;
+        };
+        Insert: {
+          content: string;
+          created_at?: string;
+          id?: string;
+          role: string;
+          user_id?: string;
+        };
+        Update: {
+          content?: string;
+          created_at?: string;
+          id?: string;
+          role?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       decisions: {
         Row: {
           created_at: string;
@@ -126,6 +189,8 @@ export type Database = {
           id: string;
           meeting_link: string | null;
           platform: string;
+          project_id: string | null;
+          reminder_sent_at: string | null;
           scheduled_at: string | null;
           started_at: string | null;
           status: string;
@@ -141,6 +206,8 @@ export type Database = {
           id?: string;
           meeting_link?: string | null;
           platform?: string;
+          project_id?: string | null;
+          reminder_sent_at?: string | null;
           scheduled_at?: string | null;
           started_at?: string | null;
           status?: string;
@@ -156,19 +223,30 @@ export type Database = {
           id?: string;
           meeting_link?: string | null;
           platform?: string;
+          project_id?: string | null;
+          reminder_sent_at?: string | null;
           scheduled_at?: string | null;
           started_at?: string | null;
           status?: string;
           title?: string;
           updated_at?: string;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "meetings_project_id_fkey";
+            columns: ["project_id"];
+            isOneToOne: false;
+            referencedRelation: "projects";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       notifications: {
         Row: {
           body: string | null;
           created_at: string;
           id: string;
+          link: string | null;
           read: boolean;
           title: string;
           type: string;
@@ -178,6 +256,7 @@ export type Database = {
           body?: string | null;
           created_at?: string;
           id?: string;
+          link?: string | null;
           read?: boolean;
           title: string;
           type: string;
@@ -187,6 +266,7 @@ export type Database = {
           body?: string | null;
           created_at?: string;
           id?: string;
+          link?: string | null;
           read?: boolean;
           title?: string;
           type?: string;
@@ -234,8 +314,10 @@ export type Database = {
           avatar_url: string | null;
           company: string | null;
           created_at: string;
+          email: string | null;
           full_name: string | null;
           id: string;
+          is_active: boolean;
           language: string | null;
           subscription_plan: string;
           time_zone: string | null;
@@ -245,8 +327,10 @@ export type Database = {
           avatar_url?: string | null;
           company?: string | null;
           created_at?: string;
+          email?: string | null;
           full_name?: string | null;
           id: string;
+          is_active?: boolean;
           language?: string | null;
           subscription_plan?: string;
           time_zone?: string | null;
@@ -256,12 +340,38 @@ export type Database = {
           avatar_url?: string | null;
           company?: string | null;
           created_at?: string;
+          email?: string | null;
           full_name?: string | null;
           id?: string;
+          is_active?: boolean;
           language?: string | null;
           subscription_plan?: string;
           time_zone?: string | null;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      projects: {
+        Row: {
+          created_at: string;
+          description: string | null;
+          id: string;
+          name: string;
+          owner_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          name: string;
+          owner_id: string;
+        };
+        Update: {
+          created_at?: string;
+          description?: string | null;
+          id?: string;
+          name?: string;
+          owner_id?: string;
         };
         Relationships: [];
       };
@@ -329,6 +439,43 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      admin_ai_usage: { Args: never; Returns: Json };
+      admin_list_meetings: {
+        Args: never;
+        Returns: {
+          created_at: string;
+          has_summary: boolean;
+          host_email: string;
+          host_name: string;
+          id: string;
+          scheduled_at: string;
+          status: string;
+          title: string;
+          transcript_count: number;
+        }[];
+      };
+      admin_list_users: {
+        Args: never;
+        Returns: {
+          created_at: string;
+          email: string;
+          full_name: string;
+          id: string;
+          is_active: boolean;
+          is_admin: boolean;
+          last_sign_in_at: string;
+          meeting_count: number;
+        }[];
+      };
+      admin_overview: { Args: never; Returns: Json };
+      admin_set_user_active: {
+        Args: { active: boolean; target: string };
+        Returns: undefined;
+      };
+      admin_set_user_role: {
+        Args: { make_admin: boolean; target: string };
+        Returns: undefined;
+      };
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"];
@@ -336,6 +483,18 @@ export type Database = {
         };
         Returns: boolean;
       };
+      is_admin: { Args: never; Returns: boolean };
+      search_workspace: {
+        Args: { q: string };
+        Returns: {
+          kind: string;
+          meeting_id: string;
+          meeting_title: string;
+          occurred_at: string;
+          snippet: string;
+        }[];
+      };
+      seed_demo_workspace: { Args: never; Returns: Json };
     };
     Enums: {
       app_role: "admin" | "user";
