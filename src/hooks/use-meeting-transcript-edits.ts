@@ -150,10 +150,12 @@ export function useMeetingTranscriptEdits(
       return false;
     }
     const isHost = isSameName(name, hostName);
-    const generic = isHost ? undefined : participants.find((p) => isGenericRemote(p.name));
+    const generic =
+      isHost || isGenericRemote(name)
+        ? undefined
+        : participants.find((p) => isGenericRemote(p.name));
     if (generic) {
-      await renameParticipant(generic, name, input.email);
-      return true;
+      return renameParticipant(generic, name, input.email);
     }
     const otherRemotes = participants.filter(
       (p) => !isSameName(p.name, hostName) && p.role !== "host",
@@ -193,9 +195,13 @@ export function useMeetingTranscriptEdits(
     return true;
   }
 
-  async function renameParticipant(participant: Participant, newName: string, email?: string) {
+  async function renameParticipant(
+    participant: Participant,
+    newName: string,
+    email?: string,
+  ): Promise<boolean> {
     const name = newName.trim();
-    if (!name || name === participant.name) return;
+    if (!name || name === participant.name) return false;
     const wasGeneric = isGenericRemote(participant.name);
     const patch: { name: string; role?: string; email?: string } = { name };
     if (wasGeneric) patch.role = "participant";
@@ -228,9 +234,10 @@ export function useMeetingTranscriptEdits(
       setTranscripts(tSnapshot);
       toast.error(pProblem || tErr?.message || gProblem || "Could not rename the participant.");
       if (tErr || gProblem) await reload();
-      return;
+      return false;
     }
     toast.success(`Renamed ${participant.name} to ${name} across all chat bubbles!`);
+    return true;
   }
 
   async function removeParticipant(participant: Participant) {
