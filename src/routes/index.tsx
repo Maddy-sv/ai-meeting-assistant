@@ -13,6 +13,7 @@ import {
   Play,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useSession } from "@/lib/auth";
 import {
   Accordion,
   AccordionContent,
@@ -46,8 +47,8 @@ export const Route = createFileRoute("/")({
 const FEATURES = [
   {
     icon: Video,
-    title: "Auto-Join & Record",
-    desc: "AI Powered Meeting Companion AI joins Google Meet, Teams or any link and records the whole session.",
+    title: "Capture Any Meeting",
+    desc: "Record from your microphone or a shared meeting tab in Google Meet, Teams or any browser call.",
   },
   {
     icon: FileText,
@@ -85,7 +86,7 @@ const WORKFLOW = [
   {
     step: "2",
     title: "Meet",
-    desc: "AI Powered Meeting Companion joins as an AI assistant and captures everything in real time.",
+    desc: "Start capturing from your microphone or meeting tab and watch the transcript build live.",
   },
   {
     step: "3",
@@ -138,8 +139,8 @@ const PLANS = [
 
 const FAQS = [
   {
-    q: "How does AI Powered Meeting Companion join my meetings?",
-    a: "You connect Google Meet, Microsoft Teams or paste a link. AI Powered Meeting Companion's AI assistant joins with your permission and records, transcribes and summarizes the session.",
+    q: "How does AI Powered Meeting Companion capture my meetings?",
+    a: "It doesn't join as a bot. You start capture from your browser, using your microphone or by sharing the meeting tab, and the app transcribes and summarizes the session.",
   },
   {
     q: "Where is my data stored?",
@@ -156,16 +157,19 @@ const FAQS = [
 ];
 
 function Landing() {
+  const { session } = useSession();
   return (
     <div className="min-h-screen">
       {/* Nav */}
-      <header className="sticky top-0 z-30 border-b border-white/5 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 lg:px-8">
-          <Link to="/" className="flex items-center gap-2">
-            <div className="gradient-bg grid h-9 w-9 place-items-center rounded-xl shadow-glow">
+      <header className="sticky top-0 z-30 border-b border-border backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 lg:px-8">
+          <Link to="/" className="flex min-w-0 items-center gap-2">
+            <div className="gradient-bg grid h-9 w-9 shrink-0 place-items-center rounded-xl shadow-glow">
               <Sparkles className="h-5 w-5 text-primary-foreground" />
             </div>
-            <span className="text-lg font-bold tracking-tight">AI Powered Meeting Companion</span>
+            <span className="truncate text-base font-bold tracking-tight sm:text-lg">
+              AI Meeting Companion
+            </span>
           </Link>
           <nav className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
             <a href="#features" className="hover:text-foreground">
@@ -181,13 +185,26 @@ function Landing() {
               FAQ
             </a>
           </nav>
-          <div className="flex items-center gap-2">
-            <Link to="/auth" className="text-sm text-muted-foreground hover:text-foreground">
-              Sign in
-            </Link>
-            <Link to="/auth">
-              <Button className="gradient-bg rounded-full shadow-glow">Get Started</Button>
-            </Link>
+          <div className="flex shrink-0 items-center gap-2">
+            {session ? (
+              <Button asChild variant="brand">
+                <Link to="/dashboard">Open app</Link>
+              </Button>
+            ) : (
+              <>
+                <Link
+                  to="/auth"
+                  className="hidden text-sm text-muted-foreground hover:text-foreground sm:inline"
+                >
+                  Sign in
+                </Link>
+                <Button asChild variant="brand">
+                  <Link to="/auth" search={{ mode: "signup" }}>
+                    Get started
+                  </Link>
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -196,8 +213,7 @@ function Landing() {
       <section className="relative mx-auto max-w-7xl px-4 pb-20 pt-16 lg:px-8 lg:pt-28">
         <div className="mx-auto max-w-4xl text-center">
           <div className="glass mx-auto mb-6 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs">
-            <Sparkles className="h-3.5 w-3.5" /> Introducing AI Powered Meeting Companion AI
-            Assistant
+            <Sparkles className="h-3.5 w-3.5" /> Your AI meeting assistant
           </div>
           <h1 className="text-4xl font-black tracking-tight sm:text-6xl lg:text-7xl">
             <span className="gradient-text">AI Powered Meeting Companion</span> — The Complete AI
@@ -208,26 +224,28 @@ function Landing() {
             meeting so your team never loses a decision, action item or insight again.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <Link to="/auth">
-              <Button size="lg" className="gradient-bg rounded-full px-8 shadow-glow">
-                Get Started <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </Link>
-            <Button size="lg" variant="outline" className="glass rounded-full border-white/10 px-8">
-              <Play className="mr-2 h-4 w-4" /> Watch Demo
+            <Button asChild size="lg" variant="brand" className="px-8">
+              <Link to="/auth" search={{ mode: "signup" }}>
+                Get started <ArrowRight />
+              </Link>
+            </Button>
+            <Button asChild size="lg" variant="glass" className="px-8">
+              <a href="#workflow">
+                <Play /> See how it works
+              </a>
             </Button>
           </div>
         </div>
 
         {/* Hero preview */}
         <div className="glass mx-auto mt-16 max-w-5xl overflow-hidden rounded-3xl p-2 shadow-soft">
-          <div className="rounded-2xl border border-white/5 bg-black/30 p-6">
+          <div className="rounded-2xl border border-border bg-surface-1/60 p-4 sm:p-6">
             <div className="mb-4 flex items-center gap-2">
-              <span className="h-3 w-3 rounded-full bg-red-500/70" />
-              <span className="h-3 w-3 rounded-full bg-yellow-500/70" />
-              <span className="h-3 w-3 rounded-full bg-green-500/70" />
-              <span className="ml-3 text-xs text-muted-foreground">
-                zeta.ai / meeting / product-sync
+              <span className="h-3 w-3 rounded-full bg-destructive/70" />
+              <span className="h-3 w-3 rounded-full bg-warning/70" />
+              <span className="h-3 w-3 rounded-full bg-success/70" />
+              <span className="ml-3 truncate text-xs text-muted-foreground">
+                Example preview · meeting / product-sync
               </span>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
@@ -370,14 +388,11 @@ function Landing() {
                   </li>
                 ))}
               </ul>
-              <Link to="/auth" className="mt-8 block">
-                <Button
-                  className={"w-full rounded-full " + (p.featured ? "gradient-bg shadow-glow" : "")}
-                  variant={p.featured ? "default" : "outline"}
-                >
+              <Button asChild className="mt-8 w-full" variant={p.featured ? "brand" : "glass"}>
+                <Link to="/auth" search={{ mode: "signup" }}>
                   {p.cta}
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           ))}
         </div>
@@ -390,7 +405,7 @@ function Landing() {
         </div>
         <Accordion type="single" collapsible className="glass rounded-2xl px-4">
           {FAQS.map((f, i) => (
-            <AccordionItem key={i} value={"i" + i} className="border-white/5">
+            <AccordionItem key={i} value={"i" + i} className="border-border">
               <AccordionTrigger className="text-left">{f.q}</AccordionTrigger>
               <AccordionContent className="text-muted-foreground">{f.a}</AccordionContent>
             </AccordionItem>
@@ -407,19 +422,20 @@ function Landing() {
           <p className="mx-auto mt-3 max-w-xl text-primary-foreground/90">
             Join the teams using AI Powered Meeting Companion to make every meeting count.
           </p>
-          <Link to="/auth" className="mt-6 inline-block">
-            <Button
-              size="lg"
-              className="rounded-full bg-background text-foreground hover:bg-background/90"
-            >
-              Get Started Free
-            </Button>
-          </Link>
+          <Button
+            asChild
+            size="lg"
+            className="mt-6 rounded-full bg-background text-foreground hover:bg-background/90"
+          >
+            <Link to="/auth" search={{ mode: "signup" }}>
+              Get started free
+            </Link>
+          </Button>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-white/5">
+      <footer className="border-t border-border">
         <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-6 px-4 py-10 md:flex-row md:items-center lg:px-8">
           <div>
             <div className="flex items-center gap-2">
@@ -429,26 +445,29 @@ function Landing() {
               <span className="font-bold">AI Powered Meeting Companion</span>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              © {new Date().getFullYear()} AI Powered Meeting Companion AI. All rights reserved.
+              © {new Date().getFullYear()} AI Powered Meeting Companion.
             </p>
           </div>
-          <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
-            <a href="#" className="hover:text-foreground">
-              Privacy Policy
+          <nav
+            aria-label="Footer"
+            className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground"
+          >
+            <a href="#features" className="hover:text-foreground">
+              Features
             </a>
-            <a href="#" className="hover:text-foreground">
-              Terms of Service
+            <a href="#workflow" className="hover:text-foreground">
+              How it works
             </a>
-            <a href="mailto:hello@zeta.ai" className="hover:text-foreground">
-              Contact
+            <a href="#faq" className="hover:text-foreground">
+              FAQ
             </a>
-            <a href="#" className="hover:text-foreground">
-              Twitter
-            </a>
-            <a href="#" className="hover:text-foreground">
-              LinkedIn
-            </a>
-          </div>
+            <Link to="/auth" className="hover:text-foreground">
+              Sign in
+            </Link>
+            <Link to="/auth" search={{ mode: "signup" }} className="hover:text-foreground">
+              Create account
+            </Link>
+          </nav>
         </div>
       </footer>
     </div>
