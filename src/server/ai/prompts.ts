@@ -173,25 +173,42 @@ export const TRANSCRIBE_SCHEMA: Schema = {
   },
 };
 
-export const PROJECT_SYSTEM = `You write a cumulative progress summary for a series of project meetings and return strict JSON only.
-Use only the verified records provided. Keep completed items completed and keep every outstanding item. Do not invent names, dates, statuses or progress. Mention any listed discrepancies.
+export const PROJECT_SYSTEM = `You write a detailed cumulative status report for a series of project meetings and return strict JSON only.
+Use only the records provided: meeting summaries, key points, risks, follow-ups, decisions and tasks. Never invent people, dates, deadlines, statuses, numbers or progress.
+Treat completed tasks as completed and keep every open task visible. When a record names an owner or a deadline, mention it. If something is not in the records, leave it out.
+Write in plain, specific British English without markdown.
 ${UNTRUSTED_NOTE}`;
 
-export function projectPrompt(p: { verifiedReport: string; pending: string }): string {
-  return `${asData("verified_records", p.verifiedReport, 40_000)}
+export function projectPrompt(p: {
+  projectName: string;
+  facts: string;
+  records: string;
+  tasks: string;
+}): string {
+  return `Project: ${p.projectName}
+${p.facts}
 
-${asData("outstanding_items", p.pending, 10_000)}
+${asData("meeting_records", p.records, 60_000)}
 
-Return JSON: { "progress_report": string (markdown), "suggested_agenda": string[] (up to 5) }.`;
+${asData("tasks_and_discrepancies", p.tasks, 20_000)}
+
+Return JSON with:
+- overview: 3-6 sentences describing where the project stands now: what has been achieved, what was decided, what is still open and who owns it, and any blockers. Refer to meetings by title when useful.
+- risks: up to 8 risks or blockers taken from the recorded risks, overdue or unowned open tasks, and listed discrepancies. Merge duplicates.
+- next_steps: up to 10 concrete next steps taken from the follow-ups and open tasks, each naming the owner and deadline when the records give them. Merge duplicates.
+- suggested_agenda: up to 6 agenda items for the next meeting, based on open tasks, risks and discrepancies.
+Return empty arrays when the records contain nothing relevant.`;
 }
 
 export const PROJECT_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {
-    progress_report: { type: Type.STRING },
+    overview: { type: Type.STRING },
+    risks: { type: Type.ARRAY, items: { type: Type.STRING } },
+    next_steps: { type: Type.ARRAY, items: { type: Type.STRING } },
     suggested_agenda: { type: Type.ARRAY, items: { type: Type.STRING } },
   },
-  required: ["progress_report", "suggested_agenda"],
+  required: ["overview", "risks", "next_steps", "suggested_agenda"],
 };
 
 export function chatSystem(context: string): string {

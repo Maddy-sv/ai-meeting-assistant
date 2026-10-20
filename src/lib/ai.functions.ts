@@ -1,7 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { buildVerifiedCumulativeSummary, resolveDeadlineToISODate } from "./continuous-memory";
+import {
+  buildVerifiedCumulativeSummary,
+  resolveDeadlineToISODate,
+  safeFormatDeadline,
+} from "./continuous-memory";
 import { parseJson } from "@/server/ai/gemini";
 import { generateForUser } from "@/server/ai/usage";
 import {
@@ -346,10 +350,135 @@ export const generateMeetingRecaps = createServerFn({ method: "POST" })
 
 const ProjectInput = z.object({ projectId: uuid });
 
+export interface ProjectTimelineEntry {
+  meeting_id: string;
+  title: string;
+  date: string;
+  status: string;
+  summary: string;
+  highlights: string[];
+}
+
+export interface ProjectDecisionEntry {
+  description: string;
+  made_by: string | null;
+  meeting_id: string | null;
+  meeting_title: string | null;
+  date: string | null;
+}
+
+export interface ProjectTaskEntry {
+  title: string;
+  assignee: string | null;
+  deadline: string | null;
+  status: string;
+  meeting_id: string | null;
+  meeting_title: string | null;
+}
+
+export interface ProjectSummaryReport {
+  overview: string;
+  progress_report: string;
+  stats: {
+    meetings: number;
+    completed_meetings: number;
+    tasks_total: number;
+    tasks_done: number;
+    tasks_open: number;
+    decisions: number;
+    participants: string[];
+  };
+  timeline: ProjectTimelineEntry[];
+  key_decisions: ProjectDecisionEntry[];
+  completed_tasks: ProjectTaskEntry[];
+  open_tasks: ProjectTaskEntry[];
+  risks: string[];
+  next_steps: string[];
+  suggested_agenda: string[];
+  discrepancies: string[];
+  ai_enhanced: boolean;
+  generated_at: string;
+}
+
+const aiProjectReport = z.object({
+  overview: z
+    .string()
+    .nullish()
+    .transform((s) => (s ?? "").trim()),
+  risks: strList(8),
+  next_steps: strList(10),
+  suggested_agenda: strList(6),
+});
+
+function jsonStrings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+        .map((v) => v.trim())
+    : [];
+}
+
+function dedupe(items: string[], limit: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const key = item
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function shortDate(iso: string | null): string {
+  if (!iso) return "date not recorded";
+  const d = new Date(iso);
+  return isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function taskLine(t: ProjectTaskEntry): string {
+  const owner = t.assignee ? `owner ${t.assignee}` : "no owner";
+  const due = t.deadline ? `due ${safeFormatDeadline(t.deadline)}` : "no deadline";
+  const from = t.meeting_title ? `; from "${t.meeting_title}"` : "";
+  return `${t.title} (${t.status.replace(/_/g, " ")}; ${owner}; ${due}${from})`;
+}
+
+function emptyProjectReport(overview: string): ProjectSummaryReport {
+  return {
+    overview,
+    progress_report: overview,
+    stats: {
+      meetings: 0,
+      completed_meetings: 0,
+      tasks_total: 0,
+      tasks_done: 0,
+      tasks_open: 0,
+      decisions: 0,
+      participants: [],
+    },
+    timeline: [],
+    key_decisions: [],
+    completed_tasks: [],
+    open_tasks: [],
+    risks: [],
+    next_steps: [],
+    suggested_agenda: [],
+    discrepancies: [],
+    ai_enhanced: false,
+    generated_at: new Date().toISOString(),
+  };
+}
+
 export const generateProjectSummary = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: z.input<typeof ProjectInput>) => parseInput(ProjectInput, input))
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data, context }): Promise<ProjectSummaryReport> => {
     const { supabase, userId } = context;
 
     const { data: project, error: pErr } = await supabase
@@ -360,31 +489,27 @@ export const generateProjectSummary = createServerFn({ method: "POST" })
     if (pErr) fail("load project", pErr, "Could not load the project.");
     if (!project || project.owner_id !== userId) throw new Error("Project not found.");
 
-    const { data: meetings, error: mErr } = await supabase
+    const { data: meetingRows, error: mErr } = await supabase
       .from("meetings")
-      .select("id, title, scheduled_at, created_at")
+      .select("id, title, status, scheduled_at, started_at, created_at")
       .eq("project_id", project.id)
-      .eq("host_id", userId)
-      .order("scheduled_at", { ascending: true, nullsFirst: false });
+      .eq("host_id", userId);
     if (mErr) fail("load project meetings", mErr, "Could not load the project's meetings.");
 
-    if (!meetings || meetings.length === 0) {
-      return {
-        progress_report: "No meetings found for this project yet.",
-        suggested_agenda: [] as string[],
-        verified_completed: [],
-        verified_pending: [],
-        verified_decisions: [],
-        conflicts: [],
-        ai_enhanced: false,
-      };
+    if (!meetingRows || meetingRows.length === 0) {
+      return emptyProjectReport("No meetings found for this project yet.");
     }
+
+    const meetings = meetingRows
+      .map((m) => ({ ...m, date: m.started_at ?? m.scheduled_at ?? m.created_at }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const byId = new Map(meetings.map((m) => [m.id, m]));
 
     const ids = meetings.map((m) => m.id);
     const [summaries, actions, decisions, transcripts, participants] = await Promise.all([
       supabase
         .from("ai_summaries")
-        .select("meeting_id, executive_summary, key_points")
+        .select("meeting_id, executive_summary, key_points, risks, follow_ups")
         .in("meeting_id", ids),
       supabase.from("action_items").select("*").in("meeting_id", ids),
       supabase.from("decisions").select("*").in("meeting_id", ids),
@@ -395,45 +520,178 @@ export const generateProjectSummary = createServerFn({ method: "POST" })
       if (r.error) fail("load project records", r.error, "Could not load the project's records.");
     }
 
+    const participantNames = dedupe(
+      (participants.data ?? []).map((p) => p.name.trim()).filter(Boolean),
+      100,
+    );
+
     const verified = buildVerifiedCumulativeSummary(
       { id: project.id, name: project.name },
-      meetings.map((m) => ({ ...m, scheduled_at: m.scheduled_at ?? m.created_at })),
+      meetings.map((m) => ({ id: m.id, title: m.title, scheduled_at: m.date })),
       summaries.data ?? [],
       actions.data ?? [],
       decisions.data ?? [],
       transcripts.data ?? [],
-      (participants.data ?? []).map((p) => p.name),
+      participantNames,
     );
 
-    const base = {
-      progress_report: verified.progress_report,
-      suggested_agenda: verified.suggested_agenda,
-      verified_completed: verified.verified_completed,
-      verified_pending: verified.verified_pending,
-      verified_decisions: verified.verified_decisions,
-      conflicts: verified.conflicts,
+    const summaryByMeeting = new Map((summaries.data ?? []).map((s) => [s.meeting_id, s]));
+    const timeline: ProjectTimelineEntry[] = meetings.map((m) => {
+      const s = summaryByMeeting.get(m.id);
+      return {
+        meeting_id: m.id,
+        title: m.title,
+        date: m.date,
+        status: m.status,
+        summary: s?.executive_summary?.trim() ?? "",
+        highlights: jsonStrings(s?.key_points),
+      };
+    });
+
+    const key_decisions: ProjectDecisionEntry[] = verified.verified_decisions.map((d) => {
+      const m = d.meeting_id ? byId.get(d.meeting_id) : undefined;
+      return {
+        description: d.description,
+        made_by: d.made_by?.trim() || null,
+        meeting_id: m?.id ?? null,
+        meeting_title: m?.title ?? null,
+        date: m?.date ?? null,
+      };
+    });
+
+    const toTask = (t: (typeof verified.verified_pending)[number]): ProjectTaskEntry => {
+      const m = byId.get(t.origin_meeting_id);
+      return {
+        title: t.title,
+        assignee: t.assignee,
+        deadline: t.deadline,
+        status: t.status,
+        meeting_id: m?.id ?? null,
+        meeting_title: m?.title ?? null,
+      };
+    };
+    const completed_tasks = verified.verified_completed.map(toTask);
+    const open_tasks = verified.verified_pending.map(toTask).sort((a, b) => {
+      const da = a.deadline ? (resolveDeadlineToISODate(a.deadline) ?? "9999") : "9999";
+      const db = b.deadline ? (resolveDeadlineToISODate(b.deadline) ?? "9999") : "9999";
+      return da.localeCompare(db);
+    });
+
+    const discrepancies = verified.conflicts.map((c) => {
+      const evidence = c.evidence.map((e) => `${e.source}: ${e.value ?? "none"}`).join(" vs ");
+      return evidence ? `${c.description} (${evidence})` : c.description;
+    });
+
+    const stats: ProjectSummaryReport["stats"] = {
+      meetings: meetings.length,
+      completed_meetings: meetings.filter((m) => m.status === "completed").length,
+      tasks_total: completed_tasks.length + open_tasks.length,
+      tasks_done: completed_tasks.length,
+      tasks_open: open_tasks.length,
+      decisions: key_decisions.length,
+      participants: participantNames,
     };
 
-    let res: Awaited<ReturnType<typeof generateForUser>>;
+    const recordedRisks = dedupe(
+      (summaries.data ?? []).flatMap((s) => jsonStrings(s.risks)),
+      8,
+    );
+    const recordedFollowUps = (summaries.data ?? []).flatMap((s) => jsonStrings(s.follow_ups));
+    const fallbackNextSteps = dedupe(
+      [
+        ...open_tasks.map((t) => {
+          const owner = t.assignee ? ` (${t.assignee}` : " (unassigned";
+          const due = t.deadline ? `, due ${safeFormatDeadline(t.deadline)})` : ")";
+          return `${t.title}${owner}${due}`;
+        }),
+        ...recordedFollowUps,
+      ],
+      10,
+    );
+
+    const latest = [...timeline].reverse().find((t) => t.summary);
+    const overviewParts = [
+      `${project.name} has ${stats.meetings} recorded meeting${stats.meetings === 1 ? "" : "s"} (${stats.completed_meetings} completed), from ${shortDate(meetings[0].date)} to ${shortDate(meetings[meetings.length - 1].date)}.`,
+      stats.tasks_total > 0
+        ? `${stats.tasks_done} of ${stats.tasks_total} task${stats.tasks_total === 1 ? " is" : "s are"} done and ${stats.tasks_open} remain${stats.tasks_open === 1 ? "s" : ""} open${open_tasks.some((t) => !t.assignee) ? `, ${open_tasks.filter((t) => !t.assignee).length} without an owner` : ""}.`
+        : "No tasks have been recorded yet.",
+      stats.decisions > 0
+        ? `${stats.decisions} decision${stats.decisions === 1 ? " has" : "s have"} been recorded.`
+        : "",
+      latest ? `Latest summary ("${latest.title}"): ${latest.summary}` : "",
+      discrepancies.length > 0
+        ? `${discrepancies.length} discrepanc${discrepancies.length === 1 ? "y needs" : "ies need"} checking.`
+        : "",
+    ];
+    const fallbackOverview = overviewParts.filter(Boolean).join(" ");
+
+    const base: ProjectSummaryReport = {
+      overview: fallbackOverview,
+      progress_report: fallbackOverview,
+      stats,
+      timeline,
+      key_decisions,
+      completed_tasks,
+      open_tasks,
+      risks: recordedRisks,
+      next_steps: fallbackNextSteps,
+      suggested_agenda: verified.suggested_agenda,
+      discrepancies,
+      ai_enhanced: false,
+      generated_at: new Date().toISOString(),
+    };
+
+    const hasRecords =
+      timeline.some((t) => t.summary || t.highlights.length) ||
+      stats.tasks_total > 0 ||
+      stats.decisions > 0;
+    if (!hasRecords) return base;
+
+    const records = timeline
+      .map((t) => {
+        const s = summaryByMeeting.get(t.meeting_id);
+        const ds = key_decisions.filter((d) => d.meeting_id === t.meeting_id);
+        const lines = [`MEETING "${t.title}" (${shortDate(t.date)}, ${t.status})`];
+        lines.push(`Summary: ${t.summary ? t.summary.slice(0, 2000) : "not generated"}`);
+        if (t.highlights.length) lines.push(`Key points: ${t.highlights.join(" | ")}`);
+        const risks = jsonStrings(s?.risks);
+        if (risks.length) lines.push(`Risks: ${risks.join(" | ")}`);
+        const follow = jsonStrings(s?.follow_ups);
+        if (follow.length) lines.push(`Follow-ups: ${follow.join(" | ")}`);
+        if (ds.length) {
+          lines.push(
+            `Decisions: ${ds.map((d) => `${d.description}${d.made_by ? ` (by ${d.made_by})` : ""}`).join(" | ")}`,
+          );
+        }
+        return lines.join("\n");
+      })
+      .join("\n\n");
+
+    const tasks = [
+      "COMPLETED TASKS:",
+      ...(completed_tasks.length ? completed_tasks.map((t) => `- ${taskLine(t)}`) : ["- none"]),
+      "",
+      "OPEN TASKS:",
+      ...(open_tasks.length ? open_tasks.map((t) => `- ${taskLine(t)}`) : ["- none"]),
+      "",
+      "DISCREPANCIES:",
+      ...(discrepancies.length ? discrepancies.map((d) => `- ${d}`) : ["- none"]),
+    ].join("\n");
+
+    const facts = [
+      `Meetings: ${stats.meetings} (${stats.completed_meetings} completed)`,
+      `Tasks: ${stats.tasks_total} total, ${stats.tasks_done} done, ${stats.tasks_open} open`,
+      `Decisions: ${stats.decisions}`,
+      `Participants: ${participantNames.join(", ") || "not recorded"}`,
+      `Today: ${shortDate(new Date().toISOString())}`,
+    ].join("\n");
+
     try {
-      res = await generateForUser(supabase, userId, "generateProjectSummary", {
+      const res = await generateForUser(supabase, userId, "generateProjectSummary", {
         contents: [
           {
             role: "user",
-            parts: [
-              {
-                text: projectPrompt({
-                  verifiedReport: verified.progress_report,
-                  pending:
-                    verified.verified_pending
-                      .map(
-                        (t) =>
-                          `- [${t.status}] ${t.title} (${t.assignee ?? "unassigned"}, due ${t.deadline ?? "not set"})`,
-                      )
-                      .join("\n") || "None",
-                }),
-              },
-            ],
+            parts: [{ text: projectPrompt({ projectName: project.name, facts, records, tasks }) }],
           },
         ],
         config: {
@@ -443,27 +701,23 @@ export const generateProjectSummary = createServerFn({ method: "POST" })
           temperature: 0.2,
         },
       });
+      const parsed = parseAi(aiProjectReport, res.text);
+      if (!parsed.overview) return base;
+      return {
+        ...base,
+        overview: parsed.overview,
+        progress_report: parsed.overview,
+        risks: parsed.risks.length ? dedupe(parsed.risks, 8) : base.risks,
+        next_steps: parsed.next_steps.length ? dedupe(parsed.next_steps, 10) : base.next_steps,
+        suggested_agenda: parsed.suggested_agenda.length
+          ? dedupe(parsed.suggested_agenda, 6)
+          : base.suggested_agenda,
+        ai_enhanced: true,
+      };
     } catch (err) {
       console.warn("[ai] project summary fell back to the verified report:", err);
-      return { ...base, ai_enhanced: false };
+      return base;
     }
-    const parsed = parseAi(
-      z.object({
-        progress_report: z.string().trim(),
-        suggested_agenda: strList(5),
-      }),
-      res.text,
-    );
-    if (!parsed.progress_report) return { ...base, ai_enhanced: false };
-
-    return {
-      ...base,
-      progress_report: parsed.progress_report,
-      suggested_agenda: parsed.suggested_agenda.length
-        ? parsed.suggested_agenda
-        : base.suggested_agenda,
-      ai_enhanced: true,
-    };
   });
 
 const ChatInput = z.object({ message: str(4000).min(1, "Message is empty") });
