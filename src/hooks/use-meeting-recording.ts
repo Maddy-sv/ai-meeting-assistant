@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { transcribeRemoteAudio } from "@/lib/ai.functions";
 import type { Transcript } from "@/components/meeting/types";
-import { errorMessage, isSameName } from "@/components/meeting/utils";
+import { errorMessage, isSameName, mutationError } from "@/components/meeting/utils";
 import type { MeetingData } from "./use-meeting-data";
 import { useLiveTranscription } from "./use-meeting-live-transcription";
 import { useScreenShareCapture } from "./use-meeting-screen-capture";
@@ -27,6 +27,8 @@ export function useMeetingRecording(
   const transcribeRemote = useServerFn(transcribeRemoteAudio);
   const [ending, setEnding] = useState(false);
   const segmentRef = useRef(0);
+  /** Transcript writes still in flight; ending the meeting waits for them. */
+  const pendingRef = useRef(new Set<Promise<unknown>>());
   const dataRef = useRef(data);
   useEffect(() => {
     dataRef.current = data;
@@ -36,6 +38,18 @@ export function useMeetingRecording(
     const maxIdx = data.transcripts.reduce((m, t) => Math.max(m, t.segment_index || 0), 0);
     segmentRef.current = Math.max(segmentRef.current, maxIdx);
   }, [data.transcripts]);
+
+  function track<T>(promise: Promise<T>): Promise<T> {
+    pendingRef.current.add(promise);
+    void promise.finally(() => pendingRef.current.delete(promise)).catch(() => undefined);
+    return promise;
+  }
+
+  async function settlePending() {
+    while (pendingRef.current.size > 0) {
+      await Promise.allSettled(Array.from(pendingRef.current));
+    }
+  }
 
   async function persistSegment(speaker: string, content: string, spokenAt?: string) {
     segmentRef.current += 1;
@@ -70,14 +84,14 @@ export function useMeetingRecording(
       const speaker = screen.remoteAudioActiveWithin(REMOTE_OVERLAP_MS)
         ? remoteSpeakerName()
         : hostName;
-      void persistSegment(speaker, text);
+      void track(persistSegment(speaker, text));
     },
     onFatalError: (message) => toast.error(message),
   });
 
   const screen = useScreenShareCapture({
     isPaused: () => live.paused,
-    onAudioChunk: async (dataUrl) => {
+    onAudioChunk: async (dataUrl: string) => {
       try {
         const res = (await transcribeRemote({
           data: {
@@ -121,12 +135,20 @@ export function useMeetingRecording(
       return;
     }
     const startedAt = meeting?.started_at || new Date().toISOString();
-    const { error } = await supabase
-      .from("meetings")
-      .update({ status: "live", started_at: startedAt })
-      .eq("id", meetingId);
-    if (error) toast.error(`Could not mark the meeting as live: ${error.message}`);
-    else setMeeting((m) => (m ? { ...m, status: "live", started_at: startedAt } : m));
+    const problem = mutationError(
+      await supabase
+        .from("meetings")
+        .update({ status: "live", started_at: startedAt })
+        .eq("id", meetingId)
+        .select("id"),
+      "Could not mark the meeting as live.",
+    );
+    if (problem) {
+      live.stop();
+      toast.error(problem);
+      return;
+    }
+    setMeeting((m) => (m ? { ...m, status: "live", started_at: startedAt } : m));
     await ensureHostParticipant();
     toast.success("Recording started.");
   }
@@ -140,9 +162,10 @@ export function useMeetingRecording(
     toast.success("Sharing started. Remote voices from the shared tab will be transcribed.");
   }
 
-  function stopCapture() {
-    screen.stop();
+  /** Stops both captures and resolves once the last audio clip has been handed off. */
+  function stopCapture(): Promise<unknown> {
     live.stop();
+    return screen.stop();
   }
 
   async function endMeeting() {
@@ -150,22 +173,28 @@ export function useMeetingRecording(
     setEnding(true);
     try {
       const pending = live.takeInterim();
-      if (pending) await persistSegment(hostName, pending);
+      if (pending) void track(persistSegment(hostName, pending));
       const duration = live.elapsed;
-      stopCapture();
+      // Wait for the final tab-audio clip and every transcript write before ending.
+      await stopCapture();
+      await settlePending();
       const endedAt = new Date().toISOString();
       const startedAt = meeting?.started_at || new Date(Date.now() - duration * 1000).toISOString();
-      const { error } = await supabase
-        .from("meetings")
-        .update({
-          status: "completed",
-          ended_at: endedAt,
-          duration_seconds: duration,
-          started_at: startedAt,
-        })
-        .eq("id", meetingId);
-      if (error) {
-        toast.error(`Could not end the meeting: ${error.message}`);
+      const problem = mutationError(
+        await supabase
+          .from("meetings")
+          .update({
+            status: "completed",
+            ended_at: endedAt,
+            duration_seconds: duration,
+            started_at: startedAt,
+          })
+          .eq("id", meetingId)
+          .select("id"),
+        "Could not end the meeting.",
+      );
+      if (problem) {
+        toast.error(problem);
         return;
       }
       setMeeting((m) =>
@@ -179,6 +208,14 @@ export function useMeetingRecording(
             }
           : m,
       );
+      const { count, error: countError } = await supabase
+        .from("transcripts")
+        .select("id", { count: "exact", head: true })
+        .eq("meeting_id", meetingId);
+      if (!countError && (count ?? 0) === 0) {
+        toast.info("No transcript was recorded, so no summary was generated.");
+        return;
+      }
       await onEnded(screen.getScreenshots());
     } finally {
       setEnding(false);
@@ -197,7 +234,7 @@ export function useMeetingRecording(
     ending,
     startRecording,
     shareTabAudio,
-    stopSharing: screen.stop,
+    stopSharing: () => void screen.stop(),
     endMeeting,
   };
 }

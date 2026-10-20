@@ -5,6 +5,8 @@ const SCREENSHOT_MS = 15_000;
 const MIN_CHUNK_BYTES = 5_000;
 /** Remote audio is only sent if the tab produced sound within this window. */
 const RECENT_AUDIO_MS = 15_000;
+/** Longest stop() waits for the final clip to be transcribed. */
+const STOP_TIMEOUT_MS = 35_000;
 
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -21,7 +23,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
  * transcription, and a low-resolution screenshot is kept every 15 seconds.
  */
 export function useScreenShareCapture(options: {
-  onAudioChunk: (dataUrl: string) => void;
+  onAudioChunk: (dataUrl: string) => void | Promise<unknown>;
   isPaused: () => boolean;
 }) {
   const [sharing, setSharing] = useState(false);
@@ -36,12 +38,19 @@ export function useScreenShareCapture(options: {
   const lastRemoteAudioAtRef = useRef(0);
   const analyserFailedRef = useRef(false);
   const screenshotsRef = useRef<string[]>([]);
+  /** Clips being converted or transcribed; stop() waits for them. */
+  const pendingRef = useRef(new Set<Promise<unknown>>());
   const optionsRef = useRef(options);
   useEffect(() => {
     optionsRef.current = options;
   });
 
-  const stop = useCallback(() => {
+  /**
+   * Stops sharing. The returned promise resolves once the final clip (recorded
+   * up to this moment) and every clip already in flight have been handled, or
+   * after a safety timeout.
+   */
+  const stop = useCallback((): Promise<unknown> => {
     activeRef.current = false;
     if (chunkTimerRef.current) clearTimeout(chunkTimerRef.current);
     chunkTimerRef.current = null;
@@ -53,17 +62,25 @@ export function useScreenShareCapture(options: {
     audioCtxRef.current = null;
     const rec = recorderRef.current;
     recorderRef.current = null;
+    let finalClip: Promise<void> = Promise.resolve();
     if (rec && rec.state !== "inactive") {
+      // Registered after `onstop`, so it runs once the last clip has been queued.
+      finalClip = new Promise((resolve) =>
+        rec.addEventListener("stop", () => resolve(), { once: true }),
+      );
       try {
         rec.stop();
       } catch {
-        // already stopped
+        finalClip = Promise.resolve();
       }
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     setSharing(false);
     setHasTabAudio(false);
+    const flushed = finalClip.then(() => Promise.allSettled(Array.from(pendingRef.current)));
+    const timeout = new Promise((resolve) => setTimeout(resolve, STOP_TIMEOUT_MS));
+    return Promise.race([flushed, timeout]);
   }, []);
 
   const recordClip = useCallback((audioStream: MediaStream) => {
@@ -83,9 +100,11 @@ export function useScreenShareCapture(options: {
       const recentAudio =
         analyserFailedRef.current || Date.now() - lastRemoteAudioAtRef.current < RECENT_AUDIO_MS;
       if (blob.size > MIN_CHUNK_BYTES && recentAudio && !optionsRef.current.isPaused()) {
-        blobToDataUrl(blob)
+        const job = blobToDataUrl(blob)
           .then((url) => optionsRef.current.onAudioChunk(url))
           .catch(() => undefined);
+        pendingRef.current.add(job);
+        void job.finally(() => pendingRef.current.delete(job));
       }
       if (activeRef.current) recordClip(audioStream);
     };
@@ -163,7 +182,7 @@ export function useScreenShareCapture(options: {
       ];
     }, SCREENSHOT_MS);
 
-    stream.getVideoTracks()[0]?.addEventListener("ended", stop);
+    stream.getVideoTracks()[0]?.addEventListener("ended", () => void stop());
     return true;
   }, [recordClip, stop]);
 
@@ -175,7 +194,12 @@ export function useScreenShareCapture(options: {
     [],
   );
 
-  useEffect(() => stop, [stop]);
+  useEffect(
+    () => () => {
+      void stop();
+    },
+    [stop],
+  );
 
   return { sharing, hasTabAudio, start, stop, getScreenshots, remoteAudioActiveWithin };
 }
