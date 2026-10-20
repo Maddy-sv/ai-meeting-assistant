@@ -11,8 +11,10 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { supabase } from "@/integrations/supabase/client";
 import { Toaster } from "@/components/ui/sonner";
+import { Button } from "@/components/ui/button";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { AuthProvider } from "@/lib/auth";
 
 function NotFoundComponent() {
   return (
@@ -24,12 +26,9 @@ function NotFoundComponent() {
           The page you're looking for doesn't exist or has been moved.
         </p>
         <div className="mt-6">
-          <Link
-            to="/"
-            className="gradient-bg inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-medium text-primary-foreground shadow-glow transition hover:opacity-90"
-          >
-            Go home
-          </Link>
+          <Button asChild variant="brand" size="lg">
+            <Link to="/">Go home</Link>
+          </Button>
         </div>
       </div>
     </div>
@@ -51,21 +50,18 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
           Something went wrong on our end. You can try refreshing or head back home.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
-          <button
+          <Button
+            variant="brand"
             onClick={() => {
               router.invalidate();
               reset();
             }}
-            className="gradient-bg inline-flex items-center justify-center rounded-full px-5 py-2 text-sm font-medium text-primary-foreground shadow-glow"
           >
             Try again
-          </button>
-          <a
-            href="/"
-            className="glass inline-flex items-center justify-center rounded-full px-5 py-2 text-sm font-medium"
-          >
-            Go home
-          </a>
+          </Button>
+          <Button asChild variant="glass">
+            <a href="/">Go home</a>
+          </Button>
         </div>
       </div>
     </div>
@@ -77,7 +73,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "AI Powered Meeting Companion — AI Workspace for Meeting Intelligence" },
+      { title: "AI Meeting Companion — AI Workspace for Meeting Intelligence" },
       {
         name: "description",
         content:
@@ -97,6 +93,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
+      // Inter is loaded from Google Fonts with display=swap; the CSS font stack falls back to
+      // the system UI font while it loads (or if it is blocked), so SSR output is unaffected.
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap",
+      },
       { rel: "stylesheet", href: appCss },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
     ],
@@ -109,7 +113,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark" style={{ colorScheme: "dark" }}>
       <head>
         <HeadContent />
       </head>
@@ -123,20 +127,14 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  const router = useRouter();
-
-  useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
-      router.invalidate();
-      if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
-    });
-    return () => sub.subscription.unsubscribe();
-  }, [router, queryClient]);
 
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
+      <AuthProvider>
+        <TooltipProvider delayDuration={200}>
+          <Outlet />
+        </TooltipProvider>
+      </AuthProvider>
       <Toaster richColors position="top-right" />
     </QueryClientProvider>
   );
