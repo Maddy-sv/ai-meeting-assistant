@@ -91,6 +91,7 @@ export function MeetingHeader({
   onOpenPip,
   onShareEmail,
   onSaveLink,
+  readOnly = false,
 }: {
   meeting: Meeting;
   transcripts: Transcript[];
@@ -99,6 +100,8 @@ export function MeetingHeader({
   onOpenPip: () => void;
   onShareEmail: () => void;
   onSaveLink: (link: string) => Promise<boolean>;
+  /** Hide every control that would change the meeting (viewer is not the host). */
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const { live, paused, elapsed } = recording;
@@ -164,15 +167,17 @@ export function MeetingHeader({
                   <ExternalLink className="h-4 w-4" /> Open link
                 </Button>
               ) : (
-                <AddMeetingLinkDialog onSave={onSaveLink} />
+                !readOnly && <AddMeetingLinkDialog onSave={onSaveLink} />
               )}
-              <Button
-                onClick={() => void recording.startRecording()}
-                disabled={recording.support === "unsupported"}
-                className="gradient-bg rounded-full text-primary-foreground shadow-glow"
-              >
-                <Video className="h-4 w-4" /> Start recording
-              </Button>
+              {!readOnly && (
+                <Button
+                  onClick={() => void recording.startRecording()}
+                  disabled={recording.support === "unsupported"}
+                  className="gradient-bg rounded-full text-primary-foreground shadow-glow"
+                >
+                  <Video className="h-4 w-4" /> Start recording
+                </Button>
+              )}
             </>
           )}
           {live && (
@@ -204,7 +209,7 @@ export function MeetingHeader({
             </>
           )}
           <CopyTranscriptMenu meeting={meeting} transcripts={transcripts} />
-          {completed && (
+          {completed && !readOnly && (
             <Button
               onClick={onShareEmail}
               className="gradient-bg rounded-full text-primary-foreground shadow-glow"

@@ -21,6 +21,7 @@ export function TranscriptMessage({
   onSetSpeaker,
   onSplit,
   onDelete,
+  readOnly = false,
 }: {
   t: Transcript;
   isHost: boolean;
@@ -29,6 +30,7 @@ export function TranscriptMessage({
   onSetSpeaker: (id: string, speaker: string) => void;
   onSplit: (id: string) => void;
   onDelete: (id: string) => void;
+  readOnly?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const multiLine = t.content.includes("\n");
@@ -66,40 +68,44 @@ export function TranscriptMessage({
         }`}
       >
         <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              className="inline-flex items-center gap-1 rounded font-semibold text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              aria-label={`Message options. Speaker: ${t.speaker}`}
-            >
-              {t.speaker}
-              {isHost && <span className="font-normal text-muted-foreground">(you)</span>}
-              <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-56">
-              {speakerOptions.length > 0 && <DropdownMenuLabel>Change speaker</DropdownMenuLabel>}
-              {speakerOptions.map((name) => (
-                <DropdownMenuItem key={name} onSelect={() => onSetSpeaker(t.id, name)}>
-                  <UserRound className="mr-2 h-4 w-4 text-muted-foreground" />
-                  {name}
-                  {isSameName(name, hostName) && " (you)"}
-                </DropdownMenuItem>
-              ))}
-              {speakerOptions.length > 0 && <DropdownMenuSeparator />}
-              {multiLine && (
-                <DropdownMenuItem onSelect={() => onSplit(t.id)}>
-                  <Scissors className="mr-2 h-4 w-4 text-muted-foreground" />
-                  Split into separate lines
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                onSelect={() => onDelete(t.id)}
-                className="text-destructive focus:text-destructive"
+          {readOnly ? (
+            <span className="font-semibold text-foreground">{t.speaker}</span>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="inline-flex items-center gap-1 rounded font-semibold text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                aria-label={`Message options. Speaker: ${t.speaker}`}
               >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete message
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                {t.speaker}
+                {isHost && <span className="font-normal text-muted-foreground">(you)</span>}
+                <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                {speakerOptions.length > 0 && <DropdownMenuLabel>Change speaker</DropdownMenuLabel>}
+                {speakerOptions.map((name) => (
+                  <DropdownMenuItem key={name} onSelect={() => onSetSpeaker(t.id, name)}>
+                    <UserRound className="mr-2 h-4 w-4 text-muted-foreground" />
+                    {name}
+                    {isSameName(name, hostName) && " (you)"}
+                  </DropdownMenuItem>
+                ))}
+                {speakerOptions.length > 0 && <DropdownMenuSeparator />}
+                {multiLine && (
+                  <DropdownMenuItem onSelect={() => onSplit(t.id)}>
+                    <Scissors className="mr-2 h-4 w-4 text-muted-foreground" />
+                    Split into separate lines
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onSelect={() => onDelete(t.id)}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete message
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <Button
             variant="ghost"
             size="icon"

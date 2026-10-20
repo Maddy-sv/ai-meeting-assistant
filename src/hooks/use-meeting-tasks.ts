@@ -12,7 +12,7 @@ import {
 } from "@/lib/ai.functions";
 import { normalizeTaskStatus } from "@/components/meeting/status";
 import type { ActionItem, Decision, ParticipantRecap } from "@/components/meeting/types";
-import { errorMessage } from "@/components/meeting/utils";
+import { errorMessage, mutationError } from "@/components/meeting/utils";
 import type { MeetingData } from "./use-meeting-data";
 
 export type NewTaskInput = { title: string; assignee: string; deadline: string };
@@ -173,10 +173,13 @@ export function useMeetingTasks(data: MeetingData) {
       snapshot = prev;
       return prev.filter((d) => d.id !== decisionId);
     });
-    const { error } = await supabase.from("decisions").delete().eq("id", decisionId);
-    if (error) {
+    const problem = mutationError(
+      await supabase.from("decisions").delete().eq("id", decisionId).select("id"),
+      "Could not remove the decision.",
+    );
+    if (problem) {
       setDecisions(snapshot);
-      toast.error(error.message || "Could not remove the decision.");
+      toast.error(problem);
     } else {
       toast.success("Decision removed.");
     }

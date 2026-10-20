@@ -118,10 +118,12 @@ function ParticipantRow({
   p,
   isHost,
   edits,
+  readOnly,
 }: {
   p: Participant;
   isHost: boolean;
   edits: MeetingTranscriptEdits;
+  readOnly: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(p.name);
@@ -184,31 +186,33 @@ function ParticipantRow({
           >
             {isHost ? "Host" : ROLE_LABEL[p.role || ""] || p.role || "Participant"}
           </Badge>
-          <div className="flex items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              aria-label={`Rename ${p.name}`}
-              onClick={() => {
-                setName(p.name);
-                setEditing(true);
-              }}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-            {!isHost && (
+          {!readOnly && (
+            <div className="flex items-center gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 hover:text-destructive"
-                aria-label={`Remove ${p.name}`}
-                onClick={() => void edits.removeParticipant(p)}
+                className="h-7 w-7"
+                aria-label={`Rename ${p.name}`}
+                onClick={() => {
+                  setName(p.name);
+                  setEditing(true);
+                }}
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Pencil className="h-3.5 w-3.5" />
               </Button>
-            )}
-          </div>
+              {!isHost && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 hover:text-destructive"
+                  aria-label={`Remove ${p.name}`}
+                  onClick={() => void edits.removeParticipant(p)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </li>
@@ -219,10 +223,12 @@ export function ParticipantsPanel({
   participants,
   hostName,
   edits,
+  readOnly = false,
 }: {
   participants: Participant[];
   hostName: string;
   edits: MeetingTranscriptEdits;
+  readOnly?: boolean;
 }) {
   return (
     <aside aria-labelledby="participants-heading" className="glass h-fit space-y-4 rounded-3xl p-5">
@@ -236,7 +242,7 @@ export function ParticipantsPanel({
             {participants.length}
           </Badge>
         </div>
-        <AddParticipantDialog edits={edits} />
+        {!readOnly && <AddParticipantDialog edits={edits} />}
       </div>
       {participants.length === 0 ? (
         <p className="py-4 text-center text-xs text-muted-foreground">
@@ -251,6 +257,7 @@ export function ParticipantsPanel({
               p={p}
               isHost={p.role === "host" || isSameName(p.name, hostName)}
               edits={edits}
+              readOnly={readOnly}
             />
           ))}
         </ul>

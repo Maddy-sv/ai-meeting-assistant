@@ -27,11 +27,14 @@ export function useMeetingData(meetingId: string) {
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [hostName, setHostName] = useState("You");
   const [hostEmail, setHostEmail] = useState<string | null>(null);
+  /** The signed-in user; only the meeting host may change the meeting. */
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setError(null);
     try {
-      const [mm, tt, pp, ss, aa, dd] = await Promise.all([
+      const [auth, mm, tt, pp, ss, aa, dd] = await Promise.all([
+        supabase.auth.getSession(),
         supabase.from("meetings").select("*").eq("id", meetingId).maybeSingle(),
         supabase
           .from("transcripts")
@@ -47,6 +50,7 @@ export function useMeetingData(meetingId: string) {
       const firstError = [mm, tt, pp, ss, aa, dd].find((r) => r.error)?.error;
       if (firstError) throw new Error(firstError.message);
 
+      setCurrentUserId(auth.data.session?.user.id ?? null);
       setMeeting((mm.data as Meeting | null) ?? null);
       setTranscripts((tt.data as Transcript[]) ?? []);
       setParticipants((pp.data as Participant[]) ?? []);
@@ -97,9 +101,22 @@ export function useMeetingData(meetingId: string) {
   }, []);
 
   // Realtime: keep action items in sync with the To-Do board and other tabs.
+  // DELETE events cannot be filtered by column (they only carry the primary
+  // key), so a separate unfiltered listener removes rows we have locally.
   useEffect(() => {
     const channel = supabase
       .channel(`meeting_actions_${meetingId}`)
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "action_items" },
+        (payload) => {
+          const oldId = (payload.old as { id?: string }).id;
+          if (!oldId) return;
+          setActions((prev) =>
+            prev.some((a) => a.id === oldId) ? prev.filter((a) => a.id !== oldId) : prev,
+          );
+        },
+      )
       .on(
         "postgres_changes",
         {
@@ -115,9 +132,6 @@ export function useMeetingData(meetingId: string) {
           } else if (payload.eventType === "INSERT") {
             const row = payload.new as ActionItem;
             setActions((prev) => (prev.some((a) => a.id === row.id) ? prev : [...prev, row]));
-          } else if (payload.eventType === "DELETE") {
-            const oldId = (payload.old as { id?: string }).id;
-            setActions((prev) => prev.filter((a) => a.id !== oldId));
           }
         },
       )
@@ -145,6 +159,7 @@ export function useMeetingData(meetingId: string) {
     setDecisions,
     hostName,
     hostEmail,
+    currentUserId,
     reload,
     reloadParticipants,
   };

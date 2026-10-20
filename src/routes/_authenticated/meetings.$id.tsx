@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Eye, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { normalizeMeetingStatus } from "@/components/layout/status";
 import { Button } from "@/components/ui/button";
@@ -117,6 +117,8 @@ function MeetingDetail() {
   const completed = meetingStatus === "completed";
   // Before the meeting starts the briefing is shown up front; afterwards it is a tab.
   const upcoming = meetingStatus === "upcoming" && !recording.live;
+  // Admins can open other users' meetings; RLS only lets the host change them.
+  const readOnly = meeting.host_id !== data.currentUserId;
   const activeTab = tab ?? (completed ? "summary" : "transcript");
   const hasTranscript = transcripts.length > 0;
 
@@ -135,9 +137,20 @@ function MeetingDetail() {
         onOpenPip={() => void openPip()}
         onShareEmail={() => setEmailOpen(true)}
         onSaveLink={edits.saveMeetingLink}
+        readOnly={readOnly}
       />
-      <LiveStatusBar recording={recording} meetingCompleted={completed} />
-      {upcoming && <BriefingPanel meetingId={meeting.id} />}
+      {readOnly ? (
+        <p
+          role="note"
+          className="flex items-center gap-2 rounded-2xl border border-border bg-surface-1 px-4 py-3 text-sm text-muted-foreground"
+        >
+          <Eye className="h-4 w-4 shrink-0" aria-hidden />
+          Read-only view. Only the meeting host can record or change this meeting.
+        </p>
+      ) : (
+        <LiveStatusBar recording={recording} meetingCompleted={completed} />
+      )}
+      {upcoming && !readOnly && <BriefingPanel meetingId={meeting.id} />}
 
       <Tabs value={activeTab} onValueChange={setTab}>
         <TabsList className="h-auto flex-wrap">
@@ -145,7 +158,7 @@ function MeetingDetail() {
           {completed && <TabsTrigger value="actions">Actions & decisions</TabsTrigger>}
           {completed && <TabsTrigger value="email">Email & recaps</TabsTrigger>}
           <TabsTrigger value="transcript">Transcript</TabsTrigger>
-          {!upcoming && <TabsTrigger value="briefing">Briefing</TabsTrigger>}
+          {!upcoming && !readOnly && <TabsTrigger value="briefing">Briefing</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="transcript">
@@ -158,12 +171,18 @@ function MeetingDetail() {
               recording={recording}
               edits={edits}
               onOpenPip={() => void openPip()}
+              readOnly={readOnly}
             />
-            <ParticipantsPanel participants={participants} hostName={hostName} edits={edits} />
+            <ParticipantsPanel
+              participants={participants}
+              hostName={hostName}
+              edits={edits}
+              readOnly={readOnly}
+            />
           </div>
         </TabsContent>
 
-        {!upcoming && (
+        {!upcoming && !readOnly && (
           <TabsContent value="briefing">
             <BriefingPanel meetingId={meeting.id} />
           </TabsContent>
@@ -175,6 +194,7 @@ function MeetingDetail() {
             hasTranscript={hasTranscript}
             summarizing={tasks.summarizing}
             onGenerate={() => void tasks.generateSummary()}
+            readOnly={readOnly}
           />
         </TabsContent>
 
@@ -185,8 +205,9 @@ function MeetingDetail() {
             hasSummary={!!summary}
             hasTranscript={hasTranscript}
             tasks={tasks}
+            readOnly={readOnly}
           />
-          <DecisionsCard decisions={decisions} tasks={tasks} />
+          <DecisionsCard decisions={decisions} tasks={tasks} readOnly={readOnly} />
         </TabsContent>
 
         <TabsContent value="email">
@@ -196,12 +217,13 @@ function MeetingDetail() {
             hasParticipants={participants.length > 0}
             tasks={tasks}
             onCompose={() => setEmailOpen(true)}
+            readOnly={readOnly}
           />
         </TabsContent>
       </Tabs>
 
       <EmailComposerDialog
-        open={emailOpen}
+        open={emailOpen && !readOnly}
         onOpenChange={setEmailOpen}
         draft={emailDraft}
         participants={participants}

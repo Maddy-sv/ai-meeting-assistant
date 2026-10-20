@@ -17,6 +17,7 @@ export function TranscriptPanel({
   recording,
   edits,
   onOpenPip,
+  readOnly = false,
 }: {
   meeting: Meeting;
   transcripts: Transcript[];
@@ -25,6 +26,7 @@ export function TranscriptPanel({
   recording: MeetingRecording;
   edits: MeetingTranscriptEdits;
   onOpenPip: () => void;
+  readOnly?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { live, interim } = recording;
@@ -53,25 +55,29 @@ export function TranscriptPanel({
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-full"
-            onClick={() => void edits.cleanTranscript()}
-            disabled={edits.cleaning || transcripts.length === 0 || live}
-          >
-            {edits.cleaning ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Wand2 className="h-4 w-4" />
-            )}
-            Clean up with AI
-          </Button>
-          <EditTranscriptDialog
-            transcripts={transcripts}
-            cleaning={edits.cleaning}
-            onSubmit={edits.cleanTranscript}
-          />
+          {!readOnly && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-full"
+                onClick={() => void edits.cleanTranscript()}
+                disabled={edits.cleaning || transcripts.length === 0 || live}
+              >
+                {edits.cleaning ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Wand2 className="h-4 w-4" />
+                )}
+                Clean up with AI
+              </Button>
+              <EditTranscriptDialog
+                transcripts={transcripts}
+                cleaning={edits.cleaning}
+                onSubmit={edits.cleanTranscript}
+              />
+            </>
+          )}
           <CopyTranscriptMenu meeting={meeting} transcripts={transcripts} size="sm" />
           {live && (
             <Button
@@ -95,11 +101,13 @@ export function TranscriptPanel({
             </div>
             <p className="text-sm font-medium">No transcript yet</p>
             <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-              {live
-                ? "Start speaking. Each finished sentence is saved here."
-                : meeting.status === "completed"
-                  ? "Nothing was recorded for this meeting. You can paste a transcript with Edit or paste."
-                  : "Press Start recording to transcribe this meeting, or paste a transcript."}
+              {readOnly
+                ? "No transcript has been recorded for this meeting."
+                : live
+                  ? "Start speaking. Each finished sentence is saved here."
+                  : meeting.status === "completed"
+                    ? "Nothing was recorded for this meeting. You can paste a transcript with Edit or paste."
+                    : "Press Start recording to transcribe this meeting, or paste a transcript."}
             </p>
           </div>
         ) : (
@@ -114,6 +122,7 @@ export function TranscriptPanel({
                 onSetSpeaker={edits.setSpeaker}
                 onSplit={edits.splitMessage}
                 onDelete={edits.deleteMessage}
+                readOnly={readOnly}
               />
             ))}
             {live && interim && (

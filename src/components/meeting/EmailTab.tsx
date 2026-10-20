@@ -11,12 +11,14 @@ export function EmailTab({
   hasParticipants,
   tasks,
   onCompose,
+  readOnly = false,
 }: {
   draft: { subject: string; body: string };
   hasSummary: boolean;
   hasParticipants: boolean;
   tasks: MeetingTasks;
   onCompose: () => void;
+  readOnly?: boolean;
 }) {
   return (
     <div className="space-y-6">
@@ -45,13 +47,15 @@ export function EmailTab({
             >
               <Copy className="h-4 w-4" /> Copy
             </Button>
-            <Button
-              size="sm"
-              onClick={onCompose}
-              className="gradient-bg rounded-full text-primary-foreground"
-            >
-              <Pencil className="h-4 w-4" /> Edit and send
-            </Button>
+            {!readOnly && (
+              <Button
+                size="sm"
+                onClick={onCompose}
+                className="gradient-bg rounded-full text-primary-foreground"
+              >
+                <Pencil className="h-4 w-4" /> Edit and send
+              </Button>
+            )}
           </div>
         </div>
         {!hasSummary && (
@@ -63,7 +67,13 @@ export function EmailTab({
           {draft.body}
         </pre>
       </section>
-      <ParticipantRecaps tasks={tasks} hasSummary={hasSummary} hasParticipants={hasParticipants} />
+      {!readOnly && (
+        <ParticipantRecaps
+          tasks={tasks}
+          hasSummary={hasSummary}
+          hasParticipants={hasParticipants}
+        />
+      )}
     </div>
   );
 }

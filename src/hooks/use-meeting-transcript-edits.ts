@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { cleanAndAlignTranscripts } from "@/lib/ai.functions";
 import type { Participant } from "@/components/meeting/types";
-import { errorMessage, isSameName } from "@/components/meeting/utils";
+import { errorMessage, isSameName, mutationError } from "@/components/meeting/utils";
 import type { MeetingData } from "./use-meeting-data";
 
 export type NewParticipantInput = { name: string; email: string; role: string };
@@ -29,10 +29,13 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
   async function setSpeaker(transcriptId: string, speaker: string) {
     const snapshot = transcripts;
     setTranscripts((prev) => prev.map((t) => (t.id === transcriptId ? { ...t, speaker } : t)));
-    const { error } = await supabase.from("transcripts").update({ speaker }).eq("id", transcriptId);
-    if (error) {
+    const problem = mutationError(
+      await supabase.from("transcripts").update({ speaker }).eq("id", transcriptId).select("id"),
+      "Could not change the speaker.",
+    );
+    if (problem) {
       setTranscripts(snapshot);
-      toast.error(error.message || "Could not change the speaker.");
+      toast.error(problem);
     } else {
       toast.success(`Assigned to ${speaker}.`);
     }
@@ -58,12 +61,16 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
       segment_index: target.segment_index,
       spoken_at: new Date(base + idx + 1).toISOString(),
     }));
-    const { error: updErr } = await supabase
-      .from("transcripts")
-      .update({ content: lines[0] })
-      .eq("id", transcriptId);
-    if (updErr) {
-      toast.error(updErr.message || "Could not split the message.");
+    const updProblem = mutationError(
+      await supabase
+        .from("transcripts")
+        .update({ content: lines[0] })
+        .eq("id", transcriptId)
+        .select("id"),
+      "Could not split the message.",
+    );
+    if (updProblem) {
+      toast.error(updProblem);
       return;
     }
     const { error: insErr } = await supabase.from("transcripts").insert(extra);
@@ -80,10 +87,13 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
   async function deleteMessage(transcriptId: string) {
     const snapshot = transcripts;
     setTranscripts((prev) => prev.filter((t) => t.id !== transcriptId));
-    const { error } = await supabase.from("transcripts").delete().eq("id", transcriptId);
-    if (error) {
+    const problem = mutationError(
+      await supabase.from("transcripts").delete().eq("id", transcriptId).select("id"),
+      "Could not delete the message.",
+    );
+    if (problem) {
       setTranscripts(snapshot);
-      toast.error(error.message || "Could not delete the message.");
+      toast.error(problem);
     } else {
       toast.success("Message deleted.");
     }
@@ -147,21 +157,22 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
     setTranscripts((prev) =>
       prev.map((t) => (t.speaker === participant.name ? { ...t, speaker: name } : t)),
     );
-    const { error: pErr } = await supabase
-      .from("participants")
-      .update({ name })
-      .eq("id", participant.id);
-    const { error: tErr } = pErr
+    const pProblem = mutationError(
+      await supabase.from("participants").update({ name }).eq("id", participant.id).select("id"),
+      "Could not rename the participant.",
+    );
+    // A participant may have no transcript lines yet, so zero rows is fine here.
+    const { error: tErr } = pProblem
       ? { error: null }
       : await supabase
           .from("transcripts")
           .update({ speaker: name })
           .eq("meeting_id", meetingId)
           .eq("speaker", participant.name);
-    if (pErr || tErr) {
+    if (pProblem || tErr) {
       setParticipants(pSnapshot);
       setTranscripts(tSnapshot);
-      toast.error((pErr || tErr)?.message || "Could not rename the participant.");
+      toast.error(pProblem || tErr?.message || "Could not rename the participant.");
       if (tErr) await reload();
       return;
     }
@@ -171,10 +182,13 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
   async function removeParticipant(participant: Participant) {
     const snapshot = participants;
     setParticipants((prev) => prev.filter((p) => p.id !== participant.id));
-    const { error } = await supabase.from("participants").delete().eq("id", participant.id);
-    if (error) {
+    const problem = mutationError(
+      await supabase.from("participants").delete().eq("id", participant.id).select("id"),
+      "Could not remove the participant.",
+    );
+    if (problem) {
       setParticipants(snapshot);
-      toast.error(error.message || "Could not remove the participant.");
+      toast.error(problem);
     } else {
       toast.success(`Removed ${participant.name}.`);
     }
@@ -189,12 +203,16 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
       toast.error("Enter a valid http(s) meeting link.");
       return false;
     }
-    const { error } = await supabase
-      .from("meetings")
-      .update({ meeting_link: value })
-      .eq("id", meetingId);
-    if (error) {
-      toast.error(error.message || "Could not save the link.");
+    const problem = mutationError(
+      await supabase
+        .from("meetings")
+        .update({ meeting_link: value })
+        .eq("id", meetingId)
+        .select("id"),
+      "Could not save the link.",
+    );
+    if (problem) {
+      toast.error(problem);
       return false;
     }
     setMeeting((prev) => (prev ? { ...prev, meeting_link: value } : prev));

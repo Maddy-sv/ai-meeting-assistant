@@ -21,6 +21,23 @@ export function errorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+export const NO_PERMISSION_MESSAGE = "You don't have permission to change this meeting.";
+
+/**
+ * Checks the result of an update or delete that ended with `.select("id")`.
+ * Row-level security silently skips rows the caller may not change, so zero
+ * affected rows is reported as a permission problem instead of a success.
+ * Returns an error message, or null when at least one row changed.
+ */
+export function mutationError(
+  res: { data: unknown[] | null; error: { message?: string } | null },
+  fallback: string,
+): string | null {
+  if (res.error) return res.error.message || fallback;
+  if (!res.data || res.data.length === 0) return NO_PERMISSION_MESSAGE;
+  return null;
+}
+
 export function formatTime(val?: string | null): string {
   if (!val) return "";
   const d = new Date(val);

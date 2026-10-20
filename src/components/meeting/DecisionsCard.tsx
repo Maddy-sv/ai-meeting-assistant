@@ -83,9 +83,11 @@ function AddDecisionDialog({ tasks }: { tasks: MeetingTasks }) {
 export function DecisionsCard({
   decisions,
   tasks,
+  readOnly = false,
 }: {
   decisions: Decision[];
   tasks: MeetingTasks;
+  readOnly?: boolean;
 }) {
   return (
     <section className="glass rounded-2xl p-6" aria-labelledby="decisions-heading">
@@ -96,7 +98,7 @@ export function DecisionsCard({
             Decisions
           </h3>
         </div>
-        <AddDecisionDialog tasks={tasks} />
+        {!readOnly && <AddDecisionDialog tasks={tasks} />}
       </div>
       {decisions.length === 0 ? (
         <p className="text-sm text-muted-foreground">No decisions recorded for this meeting.</p>
@@ -111,15 +113,17 @@ export function DecisionsCard({
                 <p className="text-sm font-medium">{d.description}</p>
                 {d.made_by && <p className="mt-1 text-xs text-muted-foreground">{d.made_by}</p>}
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 shrink-0 hover:text-destructive"
-                aria-label="Delete decision"
-                onClick={() => void tasks.deleteDecision(d.id)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              {!readOnly && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 hover:text-destructive"
+                  aria-label="Delete decision"
+                  onClick={() => void tasks.deleteDecision(d.id)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </li>
           ))}
         </ul>

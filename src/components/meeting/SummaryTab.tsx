@@ -27,11 +27,13 @@ export function SummaryTab({
   hasTranscript,
   summarizing,
   onGenerate,
+  readOnly = false,
 }: {
   summary: Summary | null;
   hasTranscript: boolean;
   summarizing: boolean;
   onGenerate: () => void;
+  readOnly?: boolean;
 }) {
   if (summarizing && !summary) {
     return (
@@ -51,17 +53,21 @@ export function SummaryTab({
         <Sparkles className="h-8 w-8 text-primary" aria-hidden />
         <h3 className="text-lg font-semibold">No summary yet</h3>
         <p className="max-w-md text-sm text-muted-foreground">
-          {hasTranscript
-            ? "Generate a summary, action items and decisions from this meeting's transcript."
-            : "A summary needs a transcript. Record the meeting or paste a transcript first."}
+          {readOnly
+            ? "No summary has been generated for this meeting."
+            : hasTranscript
+              ? "Generate a summary, action items and decisions from this meeting's transcript."
+              : "A summary needs a transcript. Record the meeting or paste a transcript first."}
         </p>
-        <Button
-          onClick={onGenerate}
-          disabled={!hasTranscript || summarizing}
-          className="gradient-bg rounded-full text-primary-foreground shadow-glow"
-        >
-          <Sparkles className="h-4 w-4" /> Generate summary
-        </Button>
+        {!readOnly && (
+          <Button
+            onClick={onGenerate}
+            disabled={!hasTranscript || summarizing}
+            className="gradient-bg rounded-full text-primary-foreground shadow-glow"
+          >
+            <Sparkles className="h-4 w-4" /> Generate summary
+          </Button>
+        )}
       </div>
     );
   }
@@ -74,20 +80,22 @@ export function SummaryTab({
             <Sparkles className="h-4 w-4 text-primary" aria-hidden />
             <h3 className="text-lg font-semibold">Executive summary</h3>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-full"
-            onClick={onGenerate}
-            disabled={summarizing || !hasTranscript}
-          >
-            {summarizing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Regenerate
-          </Button>
+          {!readOnly && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-full"
+              onClick={onGenerate}
+              disabled={summarizing || !hasTranscript}
+            >
+              {summarizing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Regenerate
+            </Button>
+          )}
         </div>
         <p className="text-sm text-muted-foreground">
           {summary.executive_summary || "The summary has no overview text."}

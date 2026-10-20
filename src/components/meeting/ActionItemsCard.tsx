@@ -117,7 +117,15 @@ function AddTaskDialog({
   );
 }
 
-function ActionRow({ a, tasks }: { a: ActionItem; tasks: MeetingTasks }) {
+function ActionRow({
+  a,
+  tasks,
+  readOnly,
+}: {
+  a: ActionItem;
+  tasks: MeetingTasks;
+  readOnly: boolean;
+}) {
   const done = normalizeTaskStatus(a.status) === "done";
   const checkboxId = `action-${a.id}`;
   return (
@@ -127,13 +135,14 @@ function ActionRow({ a, tasks }: { a: ActionItem; tasks: MeetingTasks }) {
           id={checkboxId}
           checked={done}
           onCheckedChange={() => void tasks.toggleTask(a)}
+          disabled={readOnly}
           aria-label={done ? `Mark "${a.title}" as not done` : `Mark "${a.title}" as done`}
           className="h-5 w-5"
         />
         <div className="min-w-0 flex-1">
           <label
             htmlFor={checkboxId}
-            className={`block cursor-pointer text-sm font-medium ${done ? "text-muted-foreground line-through" : ""}`}
+            className={`block text-sm ${readOnly ? "" : "cursor-pointer"} font-medium ${done ? "text-muted-foreground line-through" : ""}`}
           >
             {a.title}
           </label>
@@ -153,15 +162,17 @@ function ActionRow({ a, tasks }: { a: ActionItem; tasks: MeetingTasks }) {
         <Badge className={`border-transparent ${taskStatusClass(a.status)}`}>
           {taskStatusLabel(a.status)}
         </Badge>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 hover:text-destructive"
-          aria-label={`Delete task "${a.title}"`}
-          onClick={() => void tasks.deleteTask(a.id)}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        {!readOnly && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 hover:text-destructive"
+            aria-label={`Delete task "${a.title}"`}
+            onClick={() => void tasks.deleteTask(a.id)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </li>
   );
@@ -173,12 +184,14 @@ export function ActionItemsCard({
   hasSummary,
   hasTranscript,
   tasks,
+  readOnly = false,
 }: {
   actions: ActionItem[];
   participants: Participant[];
   hasSummary: boolean;
   hasTranscript: boolean;
   tasks: MeetingTasks;
+  readOnly?: boolean;
 }) {
   const busy = tasks.syncingTasks || tasks.summarizing;
   return (
@@ -196,16 +209,24 @@ export function ActionItemsCard({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            onClick={() => void (hasSummary ? tasks.syncTasks() : tasks.generateSummary())}
-            disabled={busy || !hasTranscript}
-            className="gradient-bg rounded-full text-primary-foreground"
-          >
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {hasSummary ? "Extract tasks with AI" : "Generate summary and tasks"}
-          </Button>
-          <AddTaskDialog tasks={tasks} participants={participants} />
+          {!readOnly && (
+            <>
+              <Button
+                size="sm"
+                onClick={() => void (hasSummary ? tasks.syncTasks() : tasks.generateSummary())}
+                disabled={busy || !hasTranscript}
+                className="gradient-bg rounded-full text-primary-foreground"
+              >
+                {busy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {hasSummary ? "Extract tasks with AI" : "Generate summary and tasks"}
+              </Button>
+              <AddTaskDialog tasks={tasks} participants={participants} />
+            </>
+          )}
           <Button asChild size="sm" variant="ghost" className="rounded-full text-primary">
             <Link to="/todo">
               To-do board <ArrowRight className="h-4 w-4" />
@@ -217,17 +238,19 @@ export function ActionItemsCard({
         <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
           <p className="font-medium text-foreground">No action items yet</p>
           <p className="mt-1 text-xs">
-            {!hasTranscript
-              ? "Record or paste a transcript, or add a task by hand."
-              : hasSummary
-                ? "Extract tasks from the transcript with AI, or add one by hand."
-                : "Generate the summary to extract tasks, or add one by hand."}
+            {readOnly
+              ? "No tasks were recorded for this meeting."
+              : !hasTranscript
+                ? "Record or paste a transcript, or add a task by hand."
+                : hasSummary
+                  ? "Extract tasks from the transcript with AI, or add one by hand."
+                  : "Generate the summary to extract tasks, or add one by hand."}
           </p>
         </div>
       ) : (
         <ul className="space-y-2.5">
           {actions.map((a) => (
-            <ActionRow key={a.id} a={a} tasks={tasks} />
+            <ActionRow key={a.id} a={a} tasks={tasks} readOnly={readOnly} />
           ))}
         </ul>
       )}
