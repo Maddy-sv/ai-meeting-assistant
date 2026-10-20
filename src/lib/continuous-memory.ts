@@ -250,11 +250,223 @@ export function normalizeAssignee(raw?: string | null): string | null {
   return clean || null;
 }
 
+const NO_ASSIGNEE =
+  /^(unknown|unassigned|someone|somebody|anyone|tbd|tbc|n\/a|none|null|nobody|no one)$/i;
+
+const SELF_ASSIGNEE =
+  /^(you|host|me|i|myself|organiser|organizer|the host|the organiser|the organizer)$/i;
+
+const REMOTE_LABEL =
+  /^(remote( participant| speaker| user)?|participant( \d+)?|speaker( \d+)?|guest( \d+)?|other participant|the other participant|attendee( \d+)?)$/i;
+
+export function resolveTaskAssignee(
+  raw: string | null | undefined,
+  hostName: string,
+  participants: string[] = [],
+): string | null {
+  const clean = normalizeAssignee(raw);
+  if (!clean || NO_ASSIGNEE.test(clean)) return null;
+  const host = hostName.trim().toLowerCase();
+  const others = Array.from(
+    new Set(
+      participants
+        .map((p) => normalizeAssignee(p))
+        .filter(
+          (p): p is string =>
+            !!p && p.toLowerCase() !== host && !REMOTE_LABEL.test(p) && !NO_ASSIGNEE.test(p),
+        ),
+    ),
+  );
+  const names = clean
+    .split(/\s*(?:,|&|\band\b|\bwith\b)\s*/i)
+    .map((part) => part.trim())
+    .filter((part) => part && !NO_ASSIGNEE.test(part))
+    .map((part) => {
+      if (SELF_ASSIGNEE.test(part)) return hostName;
+      if (REMOTE_LABEL.test(part) && others.length === 1) return others[0];
+      return part;
+    });
+  const unique = names.filter(
+    (n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i,
+  );
+  if (unique.length === 0) return null;
+  return unique.join(" and ").slice(0, 200);
+}
+
 const COMPLETION_RE =
-  /\b(completed?|finished|done|shipped|delivered|wrapped up|closed|resolved|implemented|deployed|merged)\b/i;
+  /\b(completed?|finished|done|shipped|delivered|wrapped up|closed|resolved|implemented|deployed|merged|tested|fixed|finali[sz]ed|submitted|sent|shared|published|launched|released|uploaded)\b/i;
 
 const NEGATION_RE =
-  /(\b(not|never|yet to|still|pending|in progress|remain\w*|left|outstanding|incomplete|will|shall|going to|plan to|planning to|should|need to|needs to|once|after|when|until|before|let's|lets|partly|partially|half|halfway|mostly|nearly|almost)\b|n't\b|'ll\b)/i;
+  /(\b(not|never|yet to|still|pending|in progress|remain\w*|left|outstanding|incomplete|will|shall|going to|plan to|planning to|should|need to|needs to|once|after|when|until|before|let's|lets|partly|partially|half|halfway|mostly|nearly|almost|please|must|have to|has to|can you|could you|would you)\b|n't\b|'ll\b)/i;
+
+const REMAINING_RE =
+  /\b(still needs?|still (has|have) to|still to|still pending|one more|another (round|test|pass|check)|remaining|remains|left to|yet to|not yet|outstanding|incomplete|rest of)\b/i;
+
+const PROGRESS_RE =
+  /\b(working on|worked on|work on it|started|starting on|begun|began|kicked off|in progress|underway|under way|halfway|half way|half done|partly done|partially done|partially|part of it|mostly done|nearly done|almost done|almost finished|making progress|made progress|progressing|first draft|drafted|in review|being reviewed)\b/i;
+
+const PROGRESS_NEGATION_RE =
+  /(\b(not|never|no one|nobody|yet to|haven't|hasn't|didn't|won't|will|shall|going to|plan to|planning to|should|need to|needs to|could you|can you|would you|let's|lets)\b|n't\b|'ll\b|\?\s*$)/i;
+
+const MATCH_PHRASES: Array<[RegExp, string]> = [
+  [/\buser interfaces?\b/g, " ui "],
+  [/\buser experiences?\b/g, " ux "],
+  [/\bfront[\s-]?ends?\b/g, " frontend "],
+  [/\bback[\s-]?ends?\b/g, " backend "],
+  [/\bquality assurance\b/g, " qa "],
+  [/\bpull requests?\b/g, " pr "],
+  [/\be-mails?\b/g, " email "],
+];
+
+const MATCH_SYNONYMS: Record<string, string> = {
+  docs: "doc",
+  documentation: "doc",
+  documents: "doc",
+  document: "doc",
+  database: "db",
+  databases: "db",
+  repository: "repo",
+  repositories: "repo",
+  specification: "spec",
+  specifications: "spec",
+  specs: "spec",
+  configuration: "config",
+  environment: "env",
+  environments: "env",
+  application: "app",
+  applications: "app",
+  apps: "app",
+  information: "info",
+  authentication: "auth",
+  login: "auth",
+  mail: "email",
+  mails: "email",
+  emails: "email",
+  fixes: "fix",
+  fixed: "fix",
+  fixing: "fix",
+  resolve: "fix",
+  resolves: "fix",
+  resolved: "fix",
+  resolving: "fix",
+  solve: "fix",
+  solved: "fix",
+  development: "dev",
+  develop: "dev",
+  developing: "dev",
+  developed: "dev",
+  finalise: "finalize",
+  finalised: "finalize",
+  finalising: "finalize",
+  prioritise: "prioritize",
+  organise: "organize",
+  optimise: "optimize",
+  customise: "customize",
+  analyse: "analyze",
+};
+
+const MATCH_STOPWORDS = new Set([
+  ...STOPWORDS,
+  "i",
+  "we",
+  "you",
+  "he",
+  "she",
+  "they",
+  "me",
+  "us",
+  "him",
+  "them",
+  "my",
+  "mine",
+  "s",
+  "t",
+  "ll",
+  "ve",
+  "re",
+  "d",
+  "m",
+  "also",
+  "just",
+  "then",
+  "so",
+  "as",
+  "from",
+  "into",
+  "about",
+  "was",
+  "were",
+  "been",
+  "has",
+  "have",
+  "had",
+]);
+
+function matchStem(word: string): string {
+  let w = word;
+  if (w.length > 6 && w.endsWith("ments")) w = w.slice(0, -5);
+  else if (w.length > 5 && w.endsWith("ment")) w = w.slice(0, -4);
+  else if (w.length > 4 && (w.endsWith("ies") || w.endsWith("ied"))) w = w.slice(0, -3) + "y";
+  else if (w.length > 5 && w.endsWith("ing")) w = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith("ed")) w = w.slice(0, -2);
+  else if (w.length > 4 && /(s|x|z|ch|sh)es$/.test(w)) w = w.slice(0, -2);
+  else if (w.length > 3 && w.endsWith("s") && !/(ss|us|is)$/.test(w)) w = w.slice(0, -1);
+  if (w.length > 3 && w.endsWith("e")) w = w.slice(0, -1);
+  return w;
+}
+
+export function matchTokens(text: string, ignore: string[] = []): string[] {
+  const prepare = (raw: string) => {
+    let lower = (raw || "").toLowerCase();
+    for (const [re, to] of MATCH_PHRASES) lower = lower.replace(re, to);
+    return lower
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w && !MATCH_STOPWORDS.has(w))
+      .map((w) => matchStem(MATCH_SYNONYMS[w] ?? w));
+  };
+  const ignored = new Set(ignore.flatMap(prepare));
+  return prepare(text).filter((w) => !ignored.has(w));
+}
+
+const GENERIC_TASK_WORDS = new Set(
+  matchTokens(
+    "complete completed finish finished finalize do done handle work task make prepare get take care responsibility start continue ensure remaining remain rest please need",
+  ),
+);
+
+function taskMatchTokens(text: string, ignore: string[]): string[] {
+  return Array.from(new Set(matchTokens(text, ignore).filter((w) => !GENERIC_TASK_WORDS.has(w))));
+}
+
+interface TaskShape {
+  tokens: Set<string>;
+  segments: string[][];
+}
+
+function taskShape(title: string, ignore: string[]): TaskShape {
+  const tokens = new Set(taskMatchTokens(title, ignore));
+  const segments = (title || "")
+    .split(/\s*(?:,|;|&|\band\b|\bthen\b|\bplus\b|\bas well as\b)\s*/i)
+    .map((part) => taskMatchTokens(part, ignore))
+    .filter((part) => part.length > 0);
+  return { tokens, segments: segments.length > 0 ? segments : [Array.from(tokens)] };
+}
+
+function coveredSegments(clause: string, shape: TaskShape, ignore: string[]): number[] {
+  if (shape.tokens.size === 0) return [];
+  const words = new Set(matchTokens(clause, ignore));
+  const hits = Array.from(shape.tokens).filter((w) => words.has(w)).length;
+  if (hits < Math.min(2, shape.tokens.size)) return [];
+  const covered: Array<{ index: number; ratio: number }> = [];
+  shape.segments.forEach((segment, index) => {
+    const segHits = segment.filter((w) => words.has(w)).length;
+    if (segHits >= Math.max(1, Math.ceil(segment.length * 0.6))) {
+      covered.push({ index, ratio: segHits / segment.length });
+    }
+  });
+  const best = Math.max(0, ...covered.map((c) => c.ratio));
+  return covered.filter((c) => c.ratio === best).map((c) => c.index);
+}
 
 function splitSentences(text: string): string[] {
   return (text || "")
@@ -263,21 +475,48 @@ function splitSentences(text: string): string[] {
     .filter(Boolean);
 }
 
-function mentionsTask(sentence: string, taskWords: string[]): boolean {
-  if (taskWords.length === 0) return false;
-  const words = new Set(significantWords(sentence));
-  const hits = taskWords.filter((w) => words.has(w)).length;
-  const needed = taskWords.length <= 2 ? taskWords.length : Math.ceil(taskWords.length * 0.6);
-  return hits >= needed;
+function splitClauses(sentence: string): string[] {
+  return sentence
+    .split(/,?\s+\b(?:but|however|although|though|except|whereas)\b\s*|;\s*/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
-function taskSubjectWords(title: string, ignore: string[] = []): string[] {
-  const generic = new Set(
-    significantWords(
-      "complete completed finish finished finalize do done handle work task make prepare get",
-    ),
-  );
-  return Array.from(new Set(significantWords(title, ignore).filter((w) => !generic.has(w))));
+export function assessTaskStatus(
+  text: string,
+  taskTitle: string,
+  ignore: string[] = [],
+): TaskStatus {
+  const shape = taskShape(taskTitle, ignore);
+  if (shape.tokens.size === 0) return "pending";
+  const segmentState = new Map<number, "done" | "remaining">();
+  let progress = false;
+  for (const sentence of splitSentences(text)) {
+    const question = /\?\s*$/.test(sentence);
+    for (const clause of splitClauses(sentence)) {
+      const covered = coveredSegments(clause, shape, ignore);
+      if (covered.length === 0) continue;
+      const clauseQuestion = question || /\?\s*$/.test(clause);
+      if (!clauseQuestion && COMPLETION_RE.test(clause) && !NEGATION_RE.test(clause)) {
+        for (const i of covered) segmentState.set(i, "done");
+      } else if (REMAINING_RE.test(clause)) {
+        for (const i of covered) segmentState.set(i, "remaining");
+      } else if (
+        !clauseQuestion &&
+        PROGRESS_RE.test(clause) &&
+        !PROGRESS_NEGATION_RE.test(clause)
+      ) {
+        progress = true;
+      }
+    }
+  }
+  const states = Array.from(segmentState.values());
+  const done = states.filter((s) => s === "done").length;
+  const remaining = states.length - done;
+  if (done > 0 && remaining > 0) return "in_progress";
+  if (done > 0 && done >= Math.ceil(shape.segments.length / 2)) return "done";
+  if (done > 0 || progress) return "in_progress";
+  return "pending";
 }
 
 export function confirmsCompletion(
@@ -285,23 +524,19 @@ export function confirmsCompletion(
   taskTitle: string,
   ignore: string[] = [],
 ): boolean {
-  const subject = taskSubjectWords(taskTitle, ignore);
-  return splitSentences(text).some(
-    (s) => COMPLETION_RE.test(s) && !NEGATION_RE.test(s) && mentionsTask(s, subject),
-  );
+  return assessTaskStatus(text, taskTitle, ignore) === "done";
 }
 
-const PROGRESS_RE =
-  /\b(working on|worked on|work on it|started|starting on|begun|began|kicked off|in progress|underway|under way|halfway|half way|half done|partly done|partially done|partially|part of it|mostly done|nearly done|almost done|almost finished|making progress|made progress|progressing|first draft|drafted|in review|being reviewed)\b/i;
-
-const PROGRESS_NEGATION_RE =
-  /(\b(not|never|no one|nobody|yet to|haven't|hasn't|didn't|won't|will|shall|going to|plan to|planning to|should|need to|needs to|could you|can you|would you|let's|lets)\b|n't\b|'ll\b|\?\s*$)/i;
-
 export function mentionsProgress(text: string, taskTitle: string, ignore: string[] = []): boolean {
-  const subject = taskSubjectWords(taskTitle, ignore);
-  return splitSentences(text).some(
-    (s) => PROGRESS_RE.test(s) && !PROGRESS_NEGATION_RE.test(s) && mentionsTask(s, subject),
-  );
+  return assessTaskStatus(text, taskTitle, ignore) === "in_progress";
+}
+
+export function taskTitlesMatch(a: string, b: string, ignore: string[] = []): boolean {
+  const ta = new Set(taskMatchTokens(a, ignore));
+  const tb = new Set(taskMatchTokens(b, ignore));
+  if (ta.size === 0 || tb.size === 0) return false;
+  const shared = Array.from(ta).filter((w) => tb.has(w)).length;
+  return shared / Math.max(ta.size, tb.size) >= 0.6;
 }
 
 const STATUS_RANK: Record<TaskStatus, number> = { pending: 0, in_progress: 1, done: 2 };
@@ -320,9 +555,7 @@ export function statusFromRecords(
   taskTitle: string,
   ignore: string[] = [],
 ): TaskStatus {
-  if (confirmsCompletion(text, taskTitle, ignore)) return "done";
-  if (mentionsProgress(text, taskTitle, ignore)) return "in_progress";
-  return "pending";
+  return assessTaskStatus(text, taskTitle, ignore);
 }
 
 export function evidenceSupported(evidence: string, recordsText: string): boolean {
@@ -352,17 +585,12 @@ export function planTaskProgressUpdates(
   tasks: ProgressTask[],
   ignore: string[] = [],
 ): Array<{ id: string; status: TaskStatus }> {
-  const order = [...meetings].sort((a, b) => a.date.localeCompare(b.date));
+  const order = [...meetings].sort(
+    (a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id),
+  );
   const position = new Map(order.map((m, i) => [m.id, i]));
-  const best = new Map<string, Array<{ index: number; status: TaskStatus }>>();
-  for (const t of tasks) {
-    const index = position.get(t.meeting_id);
-    if (index === undefined) continue;
-    const key = (t.canonical_key || "").trim() || canonicalTaskKey(t.title, ignore);
-    const list = best.get(key) ?? [];
-    list.push({ index, status: normalizeStatus(t.status) });
-    best.set(key, list);
-  }
+  const keyFor = (t: ProgressTask) =>
+    (t.canonical_key || "").trim() || canonicalTaskKey(t.title, ignore);
 
   const updates: Array<{ id: string; status: TaskStatus }> = [];
   for (const t of tasks) {
@@ -370,13 +598,17 @@ export function planTaskProgressUpdates(
     if (index === undefined) continue;
     const current = normalizeStatus(t.status);
     if (current === "done") continue;
-    const key = (t.canonical_key || "").trim() || canonicalTaskKey(t.title, ignore);
+    const key = keyFor(t);
     let next: TaskStatus = current;
-    for (const other of best.get(key) ?? []) {
-      if (other.index > index) next = mergeTaskStatus(next, other.status);
+    for (const other of tasks) {
+      const otherIndex = position.get(other.meeting_id);
+      if (otherIndex === undefined || otherIndex <= index) continue;
+      if (keyFor(other) === key || taskTitlesMatch(t.title, other.title, ignore)) {
+        next = mergeTaskStatus(next, other.status);
+      }
     }
     for (let i = index + 1; i < order.length && next !== "done"; i++) {
-      next = mergeTaskStatus(next, statusFromRecords(order[i].text, t.title, ignore));
+      next = mergeTaskStatus(next, assessTaskStatus(order[i].text, t.title, ignore));
     }
     if (next !== current) updates.push({ id: t.id, status: next });
   }
@@ -388,9 +620,9 @@ export function deadlineMentionedFor(
   taskTitle: string,
   ignore: string[] = [],
 ): string | null {
-  const subject = taskSubjectWords(taskTitle, ignore);
+  const shape = taskShape(taskTitle, ignore);
   for (const s of splitSentences(text)) {
-    if (!mentionsTask(s, subject)) continue;
+    if (coveredSegments(s, shape, ignore).length === 0) continue;
     const iso = /\b\d{4}-\d{2}-\d{2}\b/.exec(s);
     if (iso) return iso[0];
     const wd = WEEKDAY_RE.exec(s);
