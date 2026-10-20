@@ -35,16 +35,31 @@ function ResetPassword() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="glass w-full max-w-md rounded-3xl p-8 shadow-soft">
         <div className="mb-6 flex items-center justify-center gap-2">
-          <div className="gradient-bg grid h-10 w-10 place-items-center rounded-xl"><Sparkles className="h-5 w-5 text-primary-foreground" /></div>
+          <div className="gradient-bg grid h-10 w-10 place-items-center rounded-xl">
+            <Sparkles className="h-5 w-5 text-primary-foreground" />
+          </div>
           <span className="text-xl font-bold">AI Powered Meeting Companion</span>
         </div>
         <h1 className="text-2xl font-bold">Set a new password</h1>
         <form onSubmit={submit} className="mt-6 space-y-4">
           <div>
             <Label>New password</Label>
-            <Input type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} className="glass mt-1 border-white/10" />
+            <Input
+              type="password"
+              required
+              minLength={6}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="glass mt-1 border-white/10"
+            />
           </div>
-          <Button type="submit" disabled={loading} className="gradient-bg w-full rounded-full shadow-glow">{loading ? "Updating…" : "Update password"}</Button>
+          <Button
+            type="submit"
+            disabled={loading}
+            className="gradient-bg w-full rounded-full shadow-glow"
+          >
+            {loading ? "Updating…" : "Update password"}
+          </Button>
         </form>
       </div>
     </div>

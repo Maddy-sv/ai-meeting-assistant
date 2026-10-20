@@ -1,6 +1,6 @@
 /**
  * Continuous Meeting Memory & Cross-Meeting Task Synchronization Engine
- * 
+ *
  * Guarantees:
  * 1. Persisted meeting records and action items are treated as the source of truth.
  * 2. Stable task identifiers across meetings prevent duplication and ensure seamless updates.
@@ -96,16 +96,34 @@ export function getStableTaskId(title: string, existingId?: string): { id: strin
   const lower = (title || "").toLowerCase().trim();
 
   // Check share FIRST so "Share completed dashboard..." resolves to task:share
-  if (lower.includes("share") && (lower.includes("dashboard") || lower.includes("review") || lower.includes("participant") || lower.includes("shreyash"))) {
+  if (
+    lower.includes("share") &&
+    (lower.includes("dashboard") ||
+      lower.includes("review") ||
+      lower.includes("participant") ||
+      lower.includes("shreyash"))
+  ) {
     return { id: STABLE_TASK_IDS.share, key: "task:share" };
   }
-  if (lower.includes("dashboard") && (lower.includes("complete") || lower.includes("finalize") || lower.includes("project"))) {
+  if (
+    lower.includes("dashboard") &&
+    (lower.includes("complete") || lower.includes("finalize") || lower.includes("project"))
+  ) {
     return { id: STABLE_TASK_IDS.dashboard, key: "task:dashboard" };
   }
-  if ((lower.includes("ui improvement") || lower.includes("ui improvements") || lower.includes("qa testing") || lower.includes("ui testing"))) {
+  if (
+    lower.includes("ui improvement") ||
+    lower.includes("ui improvements") ||
+    lower.includes("qa testing") ||
+    lower.includes("ui testing")
+  ) {
     return { id: STABLE_TASK_IDS.ui_testing, key: "task:ui_testing" };
   }
-  if ((lower.includes("joint review") || lower.includes("friday review") || (lower.includes("review") && lower.includes("deliverables")))) {
+  if (
+    lower.includes("joint review") ||
+    lower.includes("friday review") ||
+    (lower.includes("review") && lower.includes("deliverables"))
+  ) {
     return { id: STABLE_TASK_IDS.joint_review, key: "task:joint_review" };
   }
   if (lower.includes("registration") || lower.includes("participant list")) {
@@ -124,7 +142,7 @@ export function getStableTaskId(title: string, existingId?: string): { id: strin
 
   return {
     id: existingId || `custom-${slug || "task"}-${Math.abs(hashString(lower))}`,
-    key: `task:${slug || "generic"}`
+    key: `task:${slug || "generic"}`,
   };
 }
 
@@ -132,7 +150,10 @@ export function getStableTaskId(title: string, existingId?: string): { id: strin
  * Resolves any deadline representation (e.g. "Wednesday", "Friday", "Tuesday evening", "2026-10-21")
  * into a concrete Date object relative to referenceDate.
  */
-export function resolveDeadlineToDate(val?: string | null, referenceDate?: string | Date | null): Date | null {
+export function resolveDeadlineToDate(
+  val?: string | null,
+  referenceDate?: string | Date | null,
+): Date | null {
   if (!val) return null;
   const str = String(val).trim();
   if (!str) return null;
@@ -180,7 +201,11 @@ export function resolveDeadlineToDate(val?: string | null, referenceDate?: strin
  * Formats a deadline into a clean, human-readable concrete date string (e.g. "21 Oct 2026").
  * Replaces weekday strings with concrete calendar dates.
  */
-export function safeFormatDeadline(val?: string | null, referenceDate?: string | Date | null, includeYear = true): string {
+export function safeFormatDeadline(
+  val?: string | null,
+  referenceDate?: string | Date | null,
+  includeYear = true,
+): string {
   if (!val) return "No deadline";
   const d = resolveDeadlineToDate(val, referenceDate);
   if (d && !isNaN(d.getTime())) {
@@ -194,7 +219,10 @@ export function safeFormatDeadline(val?: string | null, referenceDate?: string |
 /**
  * Converts any deadline to an ISO Date string YYYY-MM-DD.
  */
-export function resolveDeadlineToISODate(val?: string | null, referenceDate?: string | Date | null): string | null {
+export function resolveDeadlineToISODate(
+  val?: string | null,
+  referenceDate?: string | Date | null,
+): string | null {
   const d = resolveDeadlineToDate(val, referenceDate);
   if (d && !isNaN(d.getTime())) {
     return d.toISOString().split("T")[0];
@@ -236,7 +264,7 @@ export function deduplicateDecisions(decisions: DecisionRecord[]): DecisionRecor
     if (!seen.has(norm)) {
       seen.set(norm, {
         ...d,
-        description: d.description.trim()
+        description: d.description.trim(),
       });
     } else {
       // If previously seen without made_by and now has made_by, enrich it
@@ -301,7 +329,7 @@ export function confirmsCompletion(text: string, taskKey: string): boolean {
 
 /**
  * Reconciles tasks across sequential meetings.
- * 
+ *
  * - Preserves meeting-level historical records intact.
  * - Updates the current reconciled status to "done" when confirmed in later meetings.
  * - Preserves genuinely pending tasks (like Friday review commitments).
@@ -310,7 +338,10 @@ export function confirmsCompletion(text: string, taskKey: string): boolean {
 export function reconcileCrossMeetingTasks(
   meetings: Array<{ id: string; title: string; scheduled_at?: string | null }>,
   meetingActions: Record<string, ActionItemRecord[]>,
-  meetingContexts: Record<string, { summary?: string; transcript?: string; key_points?: string[] }> = {}
+  meetingContexts: Record<
+    string,
+    { summary?: string; transcript?: string; key_points?: string[] }
+  > = {},
 ): {
   reconciledTasks: ReconciledTask[];
   conflicts: ConflictRecord[];
@@ -334,16 +365,19 @@ export function reconcileCrossMeetingTasks(
     const contextText = `${ctx.summary || ""} ${ctx.transcript || ""} ${(ctx.key_points || []).join(" ")}`;
 
     // Store historical snapshot of this meeting's actions intact
-    historicalRecords[meeting.id] = actions.map(a => ({ ...a }));
+    historicalRecords[meeting.id] = actions.map((a) => ({ ...a }));
 
     // Detect if this meeting has specific participants
-    const hasShreyash = contextText.toLowerCase().includes("shreyash") || meeting.title.toLowerCase().includes("new2");
+    const hasShreyash =
+      contextText.toLowerCase().includes("shreyash") ||
+      meeting.title.toLowerCase().includes("new2");
     const remoteName = hasShreyash ? "Shreyash" : "Remote Participant";
 
     // 1. Process explicit action items in this meeting
     for (const a of actions) {
       const { id: stableId, key: taskKey } = getStableTaskId(a.title, a.id);
-      const isReviewCommitment = taskKey === "task:joint_review" || a.title.toLowerCase().includes("friday");
+      const isReviewCommitment =
+        taskKey === "task:joint_review" || a.title.toLowerCase().includes("friday");
 
       let currentAssignee = normalizeAssignee(a.assignee, remoteName);
       let currentDeadline = a.deadline || null;
@@ -375,22 +409,29 @@ export function reconcileCrossMeetingTasks(
               status: isDone ? "done" : "pending",
               deadline: currentDeadline,
               assignee: currentAssignee,
-            }
-          ]
+            },
+          ],
         };
 
         // Check for in-meeting deadline conflicts (e.g. summary discussion says Tuesday evening vs action item says Friday)
         if (taskKey === "task:ui_testing") {
-          const discussionMentionsTuesday = contextText.toLowerCase().includes("tuesday evening") || contextText.toLowerCase().includes("tuesday");
-          if (discussionMentionsTuesday && currentDeadline && currentDeadline.toLowerCase().includes("friday")) {
+          const discussionMentionsTuesday =
+            contextText.toLowerCase().includes("tuesday evening") ||
+            contextText.toLowerCase().includes("tuesday");
+          if (
+            discussionMentionsTuesday &&
+            currentDeadline &&
+            currentDeadline.toLowerCase().includes("friday")
+          ) {
             const conflict: ConflictRecord = {
               task_id: stableId,
               field: "deadline",
-              description: "Conflicting deadline for UI improvements: discussion agreed on Tuesday evening, but record has Friday.",
+              description:
+                "Conflicting deadline for UI improvements: discussion agreed on Tuesday evening, but record has Friday.",
               evidence: [
                 { source: `${meeting.title} discussion`, value: "Tuesday evening" },
-                { source: `${meeting.title} action item`, value: "Friday" }
-              ]
+                { source: `${meeting.title} action item`, value: "Friday" },
+              ],
             };
             newTask.conflicts.push(conflict);
             allConflicts.push(conflict);
@@ -414,7 +455,10 @@ export function reconcileCrossMeetingTasks(
         if (currentAssignee && currentAssignee !== "Unassigned") {
           if (existing.assignee === "Remote Participant" && currentAssignee === "Shreyash") {
             existing.assignee = "Shreyash";
-          } else if (existing.assignee !== currentAssignee && !existing.assignee?.includes(currentAssignee)) {
+          } else if (
+            existing.assignee !== currentAssignee &&
+            !existing.assignee?.includes(currentAssignee)
+          ) {
             // Record assignee conflict if substantially different
             if (!existing.assignee?.includes("Remote") && !currentAssignee.includes("Remote")) {
               const conflict: ConflictRecord = {
@@ -423,8 +467,8 @@ export function reconcileCrossMeetingTasks(
                 description: `Assignee discrepancy for "${existing.title}": previously "${existing.assignee}", now assigned to "${currentAssignee}".`,
                 evidence: [
                   { source: `Meeting ${existing.origin_meeting_id}`, value: existing.assignee },
-                  { source: `${meeting.title}`, value: currentAssignee }
-                ]
+                  { source: `${meeting.title}`, value: currentAssignee },
+                ],
               };
               existing.conflicts.push(conflict);
               allConflicts.push(conflict);
@@ -441,8 +485,8 @@ export function reconcileCrossMeetingTasks(
             description: `Deadline change for "${existing.title}": was "${existing.deadline}", updated to "${currentDeadline}".`,
             evidence: [
               { source: `Earlier meeting`, value: existing.deadline },
-              { source: `${meeting.title}`, value: currentDeadline }
-            ]
+              { source: `${meeting.title}`, value: currentDeadline },
+            ],
           };
           existing.conflicts.push(conflict);
           allConflicts.push(conflict);
@@ -478,7 +522,7 @@ export function reconcileCrossMeetingTasks(
   return {
     reconciledTasks: Array.from(taskMap.values()),
     conflicts: allConflicts,
-    historicalRecords
+    historicalRecords,
   };
 }
 
@@ -488,10 +532,15 @@ export function reconcileCrossMeetingTasks(
 export function buildVerifiedCumulativeSummary(
   project: { id: string; name: string },
   meetings: Array<{ id: string; title: string; scheduled_at?: string | null }>,
-  summaries: Array<{ meeting_id: string; executive_summary?: string; key_points?: string[]; follow_ups?: string[] }>,
+  summaries: Array<{
+    meeting_id: string;
+    executive_summary?: string;
+    key_points?: string[];
+    follow_ups?: string[];
+  }>,
   actions: ActionItemRecord[],
   decisions: DecisionRecord[],
-  transcripts?: Array<{ meeting_id: string; speaker: string; content: string }>
+  transcripts?: Array<{ meeting_id: string; speaker: string; content: string }>,
 ): CumulativeSummaryResult {
   // Map actions by meeting
   const meetingActions: Record<string, ActionItemRecord[]> = {};
@@ -501,28 +550,35 @@ export function buildVerifiedCumulativeSummary(
   }
 
   // Map contexts by meeting
-  const meetingContexts: Record<string, { summary?: string; transcript?: string; key_points?: string[] }> = {};
+  const meetingContexts: Record<
+    string,
+    { summary?: string; transcript?: string; key_points?: string[] }
+  > = {};
   for (const m of meetings) {
-    const s = summaries.find(x => x.meeting_id === m.id);
-    const mTranscripts = (transcripts || []).filter(t => t.meeting_id === m.id);
-    const transcriptText = mTranscripts.map(t => `${t.speaker}: ${t.content}`).join("\n");
+    const s = summaries.find((x) => x.meeting_id === m.id);
+    const mTranscripts = (transcripts || []).filter((t) => t.meeting_id === m.id);
+    const transcriptText = mTranscripts.map((t) => `${t.speaker}: ${t.content}`).join("\n");
 
     meetingContexts[m.id] = {
       summary: s?.executive_summary || "",
       key_points: s?.key_points || [],
-      transcript: transcriptText
+      transcript: transcriptText,
     };
   }
 
   // Run deterministic reconciliation
-  const { reconciledTasks, conflicts } = reconcileCrossMeetingTasks(meetings, meetingActions, meetingContexts);
+  const { reconciledTasks, conflicts } = reconcileCrossMeetingTasks(
+    meetings,
+    meetingActions,
+    meetingContexts,
+  );
 
   // Separate completed vs genuinely pending tasks
-  const verifiedCompleted = reconciledTasks.filter(t => t.status === "done");
-  const verifiedPending = reconciledTasks.filter(t => t.status !== "done");
+  const verifiedCompleted = reconciledTasks.filter((t) => t.status === "done");
+  const verifiedPending = reconciledTasks.filter((t) => t.status !== "done");
 
   // Ensure Friday review commitment is strictly present in pending tasks if not completed
-  const hasFridayReview = reconciledTasks.some(t => t.canonical_key === "task:joint_review");
+  const hasFridayReview = reconciledTasks.some((t) => t.canonical_key === "task:joint_review");
   if (!hasFridayReview && meetings.length > 0) {
     // If not found in explicit tasks but referenced in summaries/commitments, retain it
     const fridayTask: ReconciledTask = {
@@ -536,7 +592,7 @@ export function buildVerifiedCumulativeSummary(
       last_confirmed_meeting_id: meetings[meetings.length - 1].id,
       is_commitment: true,
       conflicts: [],
-      history: []
+      history: [],
     };
     verifiedPending.push(fridayTask);
   }
@@ -548,14 +604,16 @@ export function buildVerifiedCumulativeSummary(
   const reportLines: string[] = [];
   reportLines.push(`### Cumulative Progress for ${project.name}`);
   reportLines.push(
-    `Across **${meetings.length} recorded meeting${meetings.length > 1 ? "s" : ""}**, team deliverables and commitments have been tracked and verified against persisted meeting records.`
+    `Across **${meetings.length} recorded meeting${meetings.length > 1 ? "s" : ""}**, team deliverables and commitments have been tracked and verified against persisted meeting records.`,
   );
 
   // Verified Accomplishments section
   reportLines.push(`\n#### ✅ Verified Completed Deliverables:`);
   if (verifiedCompleted.length > 0) {
     for (const task of verifiedCompleted) {
-      reportLines.push(`- **${task.title}**: Completed by **${task.assignee || "Assigned owner"}** (confirmed in meeting records).`);
+      reportLines.push(
+        `- **${task.title}**: Completed by **${task.assignee || "Assigned owner"}** (confirmed in meeting records).`,
+      );
     }
   } else {
     reportLines.push(`- No deliverables confirmed as completed yet.`);
@@ -567,7 +625,9 @@ export function buildVerifiedCumulativeSummary(
     for (const task of verifiedPending) {
       const deadlineNote = task.deadline ? ` (Deadline: **${task.deadline}**)` : "";
       const commitmentTag = task.is_commitment ? ` *[Active Review Commitment]*` : "";
-      reportLines.push(`- **${task.title}**${commitmentTag}: Assigned to **${task.assignee || "Unassigned"}**${deadlineNote}.`);
+      reportLines.push(
+        `- **${task.title}**${commitmentTag}: Assigned to **${task.assignee || "Unassigned"}**${deadlineNote}.`,
+      );
     }
   } else {
     reportLines.push(`- All deliverables currently completed.`);
@@ -586,7 +646,7 @@ export function buildVerifiedCumulativeSummary(
   if (conflicts.length > 0) {
     reportLines.push(`\n#### ⚠️ Flagged Record Discrepancies:`);
     for (const c of conflicts) {
-      const evidenceStr = c.evidence.map(e => `\`${e.source}\`: "${e.value}"`).join(" vs ");
+      const evidenceStr = c.evidence.map((e) => `\`${e.source}\`: "${e.value}"`).join(" vs ");
       reportLines.push(`- **${c.description}** — Evidence: ${evidenceStr}`);
     }
   }
@@ -595,14 +655,20 @@ export function buildVerifiedCumulativeSummary(
   const suggestedAgenda: string[] = [];
   for (const pending of verifiedPending) {
     if (pending.canonical_key === "task:joint_review") {
-      suggestedAgenda.push(`Conduct joint review of completed project dashboard and UI improvements (${pending.deadline || "Friday"})`);
+      suggestedAgenda.push(
+        `Conduct joint review of completed project dashboard and UI improvements (${pending.deadline || "Friday"})`,
+      );
     } else {
-      suggestedAgenda.push(`Review progress on ${pending.title} (due ${pending.deadline || "upcoming"})`);
+      suggestedAgenda.push(
+        `Review progress on ${pending.title} (due ${pending.deadline || "upcoming"})`,
+      );
     }
   }
 
   for (const conflict of conflicts) {
-    suggestedAgenda.push(`Clarify and align on ${conflict.field} discrepancy: ${conflict.description}`);
+    suggestedAgenda.push(
+      `Clarify and align on ${conflict.field} discrepancy: ${conflict.description}`,
+    );
   }
 
   if (suggestedAgenda.length === 0) {
@@ -615,6 +681,6 @@ export function buildVerifiedCumulativeSummary(
     verified_completed: verifiedCompleted,
     verified_pending: verifiedPending,
     verified_decisions: verifiedDecisions,
-    conflicts
+    conflicts,
   };
 }

@@ -1,47 +1,158 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Sparkles, Video, FileText, ListChecks, Search, Mail, CalendarDays, Bot, ArrowRight, Check, Play } from "lucide-react";
+import {
+  Sparkles,
+  Video,
+  FileText,
+  ListChecks,
+  Search,
+  Mail,
+  CalendarDays,
+  Bot,
+  ArrowRight,
+  Check,
+  Play,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "AI Powered Meeting Companion — The Complete AI Workspace for Your Meetings" },
-      { name: "description", content: "AI Powered Meeting Companion records, transcribes, summarizes and organizes every online meeting. Never miss a decision, action item or insight again." },
-      { property: "og:title", content: "AI Powered Meeting Companion — The Complete AI Workspace for Your Meetings" },
-      { property: "og:description", content: "Real-time transcription, AI summaries, semantic search and action tracking across every meeting." },
+      {
+        name: "description",
+        content:
+          "AI Powered Meeting Companion records, transcribes, summarizes and organizes every online meeting. Never miss a decision, action item or insight again.",
+      },
+      {
+        property: "og:title",
+        content: "AI Powered Meeting Companion — The Complete AI Workspace for Your Meetings",
+      },
+      {
+        property: "og:description",
+        content:
+          "Real-time transcription, AI summaries, semantic search and action tracking across every meeting.",
+      },
     ],
   }),
   component: Landing,
 });
 
 const FEATURES = [
-  { icon: Video, title: "Auto-Join & Record", desc: "AI Powered Meeting Companion AI joins Google Meet, Teams or any link and records the whole session." },
-  { icon: FileText, title: "Real-Time Transcripts", desc: "Live captions with speaker labels and timestamps you can pause, resume and download." },
-  { icon: Sparkles, title: "AI Summaries", desc: "Executive summary, key points, decisions, risks and follow-ups in beautiful cards." },
-  { icon: ListChecks, title: "Action Items", desc: "Automatically extract tasks, owners and deadlines and track them to completion." },
-  { icon: Search, title: "Semantic Search", desc: "Ask 'What did we decide about pricing?' and jump to the exact moment." },
-  { icon: Mail, title: "Email Automation", desc: "Draft polished recap emails and send via Gmail with one click." },
+  {
+    icon: Video,
+    title: "Auto-Join & Record",
+    desc: "AI Powered Meeting Companion AI joins Google Meet, Teams or any link and records the whole session.",
+  },
+  {
+    icon: FileText,
+    title: "Real-Time Transcripts",
+    desc: "Live captions with speaker labels and timestamps you can pause, resume and download.",
+  },
+  {
+    icon: Sparkles,
+    title: "AI Summaries",
+    desc: "Executive summary, key points, decisions, risks and follow-ups in beautiful cards.",
+  },
+  {
+    icon: ListChecks,
+    title: "Action Items",
+    desc: "Automatically extract tasks, owners and deadlines and track them to completion.",
+  },
+  {
+    icon: Search,
+    title: "Semantic Search",
+    desc: "Ask 'What did we decide about pricing?' and jump to the exact moment.",
+  },
+  {
+    icon: Mail,
+    title: "Email Automation",
+    desc: "Draft polished recap emails and send via Gmail with one click.",
+  },
 ];
 
 const WORKFLOW = [
-  { step: "1", title: "Connect", desc: "Link Google Meet, Microsoft Teams or paste any meeting URL." },
-  { step: "2", title: "Meet", desc: "AI Powered Meeting Companion joins as an AI assistant and captures everything in real time." },
-  { step: "3", title: "Review", desc: "Get a full summary, action items and a searchable transcript minutes later." },
-  { step: "4", title: "Act", desc: "Send recap emails, assign tasks and search across every meeting instantly." },
+  {
+    step: "1",
+    title: "Connect",
+    desc: "Link Google Meet, Microsoft Teams or paste any meeting URL.",
+  },
+  {
+    step: "2",
+    title: "Meet",
+    desc: "AI Powered Meeting Companion joins as an AI assistant and captures everything in real time.",
+  },
+  {
+    step: "3",
+    title: "Review",
+    desc: "Get a full summary, action items and a searchable transcript minutes later.",
+  },
+  {
+    step: "4",
+    title: "Act",
+    desc: "Send recap emails, assign tasks and search across every meeting instantly.",
+  },
 ];
 
 const PLANS = [
-  { name: "Free", price: "$0", tag: "Try AI Powered Meeting Companion", features: ["5 meetings / month", "Live transcription", "Basic AI summary", "Community support"], cta: "Get Started" },
-  { name: "Pro", price: "$19", tag: "Most popular", features: ["Unlimited meetings", "Advanced summaries", "AI chat over history", "Gmail & Calendar", "Priority support"], cta: "Start Pro", featured: true },
-  { name: "Enterprise", price: "Custom", tag: "For teams", features: ["SSO / SAML", "Admin controls", "Retention policies", "Dedicated support", "SLA & security review"], cta: "Contact Sales" },
+  {
+    name: "Free",
+    price: "$0",
+    tag: "Try AI Powered Meeting Companion",
+    features: ["5 meetings / month", "Live transcription", "Basic AI summary", "Community support"],
+    cta: "Get Started",
+  },
+  {
+    name: "Pro",
+    price: "$19",
+    tag: "Most popular",
+    features: [
+      "Unlimited meetings",
+      "Advanced summaries",
+      "AI chat over history",
+      "Gmail & Calendar",
+      "Priority support",
+    ],
+    cta: "Start Pro",
+    featured: true,
+  },
+  {
+    name: "Enterprise",
+    price: "Custom",
+    tag: "For teams",
+    features: [
+      "SSO / SAML",
+      "Admin controls",
+      "Retention policies",
+      "Dedicated support",
+      "SLA & security review",
+    ],
+    cta: "Contact Sales",
+  },
 ];
 
 const FAQS = [
-  { q: "How does AI Powered Meeting Companion join my meetings?", a: "You connect Google Meet, Microsoft Teams or paste a link. AI Powered Meeting Companion's AI assistant joins with your permission and records, transcribes and summarizes the session." },
-  { q: "Where is my data stored?", a: "All transcripts and summaries live in your encrypted workspace. You control retention and can delete any meeting at any time." },
-  { q: "Can I search across all past meetings?", a: "Yes. AI Powered Meeting Companion indexes every transcript and lets you ask natural-language questions like 'Who owns the auth refactor?'." },
-  { q: "Do you integrate with Gmail and Calendar?", a: "AI Powered Meeting Companion drafts recap emails you can send via Gmail and syncs upcoming meetings from Google Calendar." },
+  {
+    q: "How does AI Powered Meeting Companion join my meetings?",
+    a: "You connect Google Meet, Microsoft Teams or paste a link. AI Powered Meeting Companion's AI assistant joins with your permission and records, transcribes and summarizes the session.",
+  },
+  {
+    q: "Where is my data stored?",
+    a: "All transcripts and summaries live in your encrypted workspace. You control retention and can delete any meeting at any time.",
+  },
+  {
+    q: "Can I search across all past meetings?",
+    a: "Yes. AI Powered Meeting Companion indexes every transcript and lets you ask natural-language questions like 'Who owns the auth refactor?'.",
+  },
+  {
+    q: "Do you integrate with Gmail and Calendar?",
+    a: "AI Powered Meeting Companion drafts recap emails you can send via Gmail and syncs upcoming meetings from Google Calendar.",
+  },
 ];
 
 function Landing() {
@@ -57,13 +168,23 @@ function Landing() {
             <span className="text-lg font-bold tracking-tight">AI Powered Meeting Companion</span>
           </Link>
           <nav className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
-            <a href="#features" className="hover:text-foreground">Features</a>
-            <a href="#workflow" className="hover:text-foreground">How it works</a>
-            <a href="#pricing" className="hover:text-foreground">Pricing</a>
-            <a href="#faq" className="hover:text-foreground">FAQ</a>
+            <a href="#features" className="hover:text-foreground">
+              Features
+            </a>
+            <a href="#workflow" className="hover:text-foreground">
+              How it works
+            </a>
+            <a href="#pricing" className="hover:text-foreground">
+              Pricing
+            </a>
+            <a href="#faq" className="hover:text-foreground">
+              FAQ
+            </a>
           </nav>
           <div className="flex items-center gap-2">
-            <Link to="/auth" className="text-sm text-muted-foreground hover:text-foreground">Sign in</Link>
+            <Link to="/auth" className="text-sm text-muted-foreground hover:text-foreground">
+              Sign in
+            </Link>
             <Link to="/auth">
               <Button className="gradient-bg rounded-full shadow-glow">Get Started</Button>
             </Link>
@@ -75,13 +196,16 @@ function Landing() {
       <section className="relative mx-auto max-w-7xl px-4 pb-20 pt-16 lg:px-8 lg:pt-28">
         <div className="mx-auto max-w-4xl text-center">
           <div className="glass mx-auto mb-6 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs">
-            <Sparkles className="h-3.5 w-3.5" /> Introducing AI Powered Meeting Companion AI Assistant
+            <Sparkles className="h-3.5 w-3.5" /> Introducing AI Powered Meeting Companion AI
+            Assistant
           </div>
           <h1 className="text-4xl font-black tracking-tight sm:text-6xl lg:text-7xl">
-            <span className="gradient-text">AI Powered Meeting Companion</span> — The Complete AI Workspace for Your Meetings
+            <span className="gradient-text">AI Powered Meeting Companion</span> — The Complete AI
+            Workspace for Your Meetings
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
-            AI Powered Meeting Companion automatically transcribes, summarizes and organizes every meeting so your team never loses a decision, action item or insight again.
+            AI Powered Meeting Companion automatically transcribes, summarizes and organizes every
+            meeting so your team never loses a decision, action item or insight again.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <Link to="/auth">
@@ -102,7 +226,9 @@ function Landing() {
               <span className="h-3 w-3 rounded-full bg-red-500/70" />
               <span className="h-3 w-3 rounded-full bg-yellow-500/70" />
               <span className="h-3 w-3 rounded-full bg-green-500/70" />
-              <span className="ml-3 text-xs text-muted-foreground">zeta.ai / meeting / product-sync</span>
+              <span className="ml-3 text-xs text-muted-foreground">
+                zeta.ai / meeting / product-sync
+              </span>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               <div className="md:col-span-2 space-y-3">
@@ -118,7 +244,9 @@ function Landing() {
                 ))}
               </div>
               <div className="glass rounded-2xl p-4">
-                <div className="text-xs uppercase tracking-widest text-muted-foreground">AI Summary</div>
+                <div className="text-xs uppercase tracking-widest text-muted-foreground">
+                  AI Summary
+                </div>
                 <div className="mt-2 text-sm font-semibold">Ship new auth by Friday</div>
                 <ul className="mt-3 space-y-1.5 text-xs text-muted-foreground">
                   <li>• Marcus owns migration</li>
@@ -134,12 +262,19 @@ function Landing() {
       {/* Features */}
       <section id="features" className="mx-auto max-w-7xl px-4 py-20 lg:px-8">
         <div className="mb-12 text-center">
-          <h2 className="text-3xl font-bold sm:text-4xl">Everything you need after "You're on mute."</h2>
-          <p className="mx-auto mt-3 max-w-2xl text-muted-foreground">Every feature is tuned for teams that live in meetings.</p>
+          <h2 className="text-3xl font-bold sm:text-4xl">
+            Everything you need after "You're on mute."
+          </h2>
+          <p className="mx-auto mt-3 max-w-2xl text-muted-foreground">
+            Every feature is tuned for teams that live in meetings.
+          </p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((f) => (
-            <div key={f.title} className="glass rounded-2xl p-6 transition hover:-translate-y-0.5 hover:shadow-glow">
+            <div
+              key={f.title}
+              className="glass rounded-2xl p-6 transition hover:-translate-y-0.5 hover:shadow-glow"
+            >
               <div className="gradient-bg mb-4 grid h-11 w-11 place-items-center rounded-xl">
                 <f.icon className="h-5 w-5 text-primary-foreground" />
               </div>
@@ -171,11 +306,23 @@ function Landing() {
         <div className="glass rounded-3xl p-8 md:p-12">
           <div className="grid gap-8 md:grid-cols-2 md:items-center">
             <div>
-              <h2 className="text-3xl font-bold sm:text-4xl">Reclaim <span className="gradient-text">10+ hours</span> a week</h2>
-              <p className="mt-4 text-muted-foreground">Stop rewatching recordings and rewriting notes. AI Powered Meeting Companion handles it, so your team ships faster and forgets nothing.</p>
+              <h2 className="text-3xl font-bold sm:text-4xl">
+                Reclaim <span className="gradient-text">10+ hours</span> a week
+              </h2>
+              <p className="mt-4 text-muted-foreground">
+                Stop rewatching recordings and rewriting notes. AI Powered Meeting Companion handles
+                it, so your team ships faster and forgets nothing.
+              </p>
               <ul className="mt-6 space-y-3 text-sm">
-                {["No more note-taking during calls", "Instant recap emails after each meeting", "Every decision searchable in seconds", "Onboard new teammates with meeting memory"].map((b) => (
-                  <li key={b} className="flex items-center gap-2"><Check className="h-4 w-4 text-primary" /> {b}</li>
+                {[
+                  "No more note-taking during calls",
+                  "Instant recap emails after each meeting",
+                  "Every decision searchable in seconds",
+                  "Onboard new teammates with meeting memory",
+                ].map((b) => (
+                  <li key={b} className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-primary" /> {b}
+                  </li>
                 ))}
               </ul>
             </div>
@@ -204,7 +351,12 @@ function Landing() {
         </div>
         <div className="grid gap-6 md:grid-cols-3">
           {PLANS.map((p) => (
-            <div key={p.name} className={"glass rounded-3xl p-8 " + (p.featured ? "shadow-glow ring-1 ring-primary" : "")}>
+            <div
+              key={p.name}
+              className={
+                "glass rounded-3xl p-8 " + (p.featured ? "shadow-glow ring-1 ring-primary" : "")
+              }
+            >
               <div className="text-xs uppercase tracking-widest text-muted-foreground">{p.tag}</div>
               <div className="mt-1 text-2xl font-bold">{p.name}</div>
               <div className="mt-4 flex items-baseline gap-1">
@@ -213,11 +365,16 @@ function Landing() {
               </div>
               <ul className="mt-6 space-y-2 text-sm">
                 {p.features.map((f) => (
-                  <li key={f} className="flex items-center gap-2"><Check className="h-4 w-4 text-primary" /> {f}</li>
+                  <li key={f} className="flex items-center gap-2">
+                    <Check className="h-4 w-4 text-primary" /> {f}
+                  </li>
                 ))}
               </ul>
               <Link to="/auth" className="mt-8 block">
-                <Button className={"w-full rounded-full " + (p.featured ? "gradient-bg shadow-glow" : "")} variant={p.featured ? "default" : "outline"}>
+                <Button
+                  className={"w-full rounded-full " + (p.featured ? "gradient-bg shadow-glow" : "")}
+                  variant={p.featured ? "default" : "outline"}
+                >
                   {p.cta}
                 </Button>
               </Link>
@@ -244,10 +401,17 @@ function Landing() {
       {/* CTA */}
       <section className="mx-auto max-w-5xl px-4 py-16 lg:px-8">
         <div className="glass gradient-bg rounded-3xl p-10 text-center shadow-glow">
-          <h2 className="text-3xl font-black text-primary-foreground sm:text-4xl">Meet smarter. Ship faster.</h2>
-          <p className="mx-auto mt-3 max-w-xl text-primary-foreground/90">Join the teams using AI Powered Meeting Companion to make every meeting count.</p>
+          <h2 className="text-3xl font-black text-primary-foreground sm:text-4xl">
+            Meet smarter. Ship faster.
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-primary-foreground/90">
+            Join the teams using AI Powered Meeting Companion to make every meeting count.
+          </p>
           <Link to="/auth" className="mt-6 inline-block">
-            <Button size="lg" className="rounded-full bg-background text-foreground hover:bg-background/90">
+            <Button
+              size="lg"
+              className="rounded-full bg-background text-foreground hover:bg-background/90"
+            >
               Get Started Free
             </Button>
           </Link>
@@ -264,14 +428,26 @@ function Landing() {
               </div>
               <span className="font-bold">AI Powered Meeting Companion</span>
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">© {new Date().getFullYear()} AI Powered Meeting Companion AI. All rights reserved.</p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              © {new Date().getFullYear()} AI Powered Meeting Companion AI. All rights reserved.
+            </p>
           </div>
           <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
-            <a href="#" className="hover:text-foreground">Privacy Policy</a>
-            <a href="#" className="hover:text-foreground">Terms of Service</a>
-            <a href="mailto:hello@zeta.ai" className="hover:text-foreground">Contact</a>
-            <a href="#" className="hover:text-foreground">Twitter</a>
-            <a href="#" className="hover:text-foreground">LinkedIn</a>
+            <a href="#" className="hover:text-foreground">
+              Privacy Policy
+            </a>
+            <a href="#" className="hover:text-foreground">
+              Terms of Service
+            </a>
+            <a href="mailto:hello@zeta.ai" className="hover:text-foreground">
+              Contact
+            </a>
+            <a href="#" className="hover:text-foreground">
+              Twitter
+            </a>
+            <a href="#" className="hover:text-foreground">
+              LinkedIn
+            </a>
           </div>
         </div>
       </footer>

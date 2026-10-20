@@ -2,7 +2,15 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { FolderKanban, ArrowLeft, Video, Calendar, Sparkles, Loader2, ArrowRight } from "lucide-react";
+import {
+  FolderKanban,
+  ArrowLeft,
+  Video,
+  Calendar,
+  Sparkles,
+  Loader2,
+  ArrowRight,
+} from "lucide-react";
 import { toast } from "sonner";
 import { generateProjectSummary as genSummaryFn } from "@/lib/ai.functions";
 
@@ -44,9 +52,9 @@ function ProjectDashboard() {
       .select("*")
       .eq("project_id", id)
       .order("scheduled_at", { ascending: false });
-    
+
     setMeetings((m as Meeting[]) || []);
-    
+
     // Check if there is an existing cumulative summary (for now we don't save it to DB, we just generate it on the fly, or we could save it to a new table `project_summaries`. Let's just generate on fly for now)
     setLoading(false);
   }
@@ -60,12 +68,12 @@ function ProjectDashboard() {
       toast.error("Add some meetings to this project first!");
       return;
     }
-    
+
     setGenerating(true);
     try {
       // Call the server function
       const data = await genSummaryFn({ data: { projectId: id } });
-      
+
       setCumulativeSummary(data);
       toast.success("Cumulative summary generated!");
     } catch (err: any) {
@@ -80,7 +88,10 @@ function ProjectDashboard() {
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
-      <Link to="/projects" className="inline-flex items-center text-sm text-muted-foreground hover:text-white transition-colors">
+      <Link
+        to="/projects"
+        className="inline-flex items-center text-sm text-muted-foreground hover:text-white transition-colors"
+      >
         <ArrowLeft className="mr-2 h-4 w-4" /> Back to Projects
       </Link>
 
@@ -91,10 +102,12 @@ function ProjectDashboard() {
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
             <h1 className="text-4xl font-black tracking-tight mb-2">{project.name}</h1>
-            <p className="text-muted-foreground text-lg">{project.description || "No description provided."}</p>
+            <p className="text-muted-foreground text-lg">
+              {project.description || "No description provided."}
+            </p>
           </div>
-          <Button 
-            onClick={generateCumulativeSummary} 
+          <Button
+            onClick={generateCumulativeSummary}
             disabled={generating || meetings.length === 0}
             className="gradient-bg rounded-full shadow-glow shrink-0 text-md px-6 py-6"
           >
@@ -121,7 +134,9 @@ function ProjectDashboard() {
               </div>
             </div>
             <div className="glass p-6 rounded-2xl border border-amber-500/20">
-              <h3 className="text-lg font-bold mb-4 text-amber-500">Suggested Agenda for Next Meeting</h3>
+              <h3 className="text-lg font-bold mb-4 text-amber-500">
+                Suggested Agenda for Next Meeting
+              </h3>
               <ul className="space-y-3">
                 {cumulativeSummary.suggested_agenda?.map((item: string, i: number) => (
                   <li key={i} className="flex gap-3 text-sm text-muted-foreground">
@@ -131,8 +146,11 @@ function ProjectDashboard() {
                     <span className="mt-0.5">{item}</span>
                   </li>
                 ))}
-                {(!cumulativeSummary.suggested_agenda || cumulativeSummary.suggested_agenda.length === 0) && (
-                  <p className="text-sm text-muted-foreground">No specific agenda items suggested.</p>
+                {(!cumulativeSummary.suggested_agenda ||
+                  cumulativeSummary.suggested_agenda.length === 0) && (
+                  <p className="text-sm text-muted-foreground">
+                    No specific agenda items suggested.
+                  </p>
                 )}
               </ul>
             </div>
@@ -144,16 +162,23 @@ function ProjectDashboard() {
         <h2 className="text-2xl font-bold flex items-center gap-2">
           <Video className="text-muted-foreground" /> Project Meetings ({meetings.length})
         </h2>
-        
+
         {meetings.length === 0 ? (
           <div className="glass rounded-2xl p-8 text-center border-dashed border-2 border-white/10">
             <p className="text-muted-foreground">No meetings assigned to this project yet.</p>
-            <p className="text-xs text-muted-foreground mt-2">When scheduling a new meeting, select this project to link them.</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              When scheduling a new meeting, select this project to link them.
+            </p>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {meetings.map((m) => (
-              <Link key={m.id} to={`/meetings/$id`} params={{ id: m.id }} className="glass group rounded-2xl p-5 transition-all hover:scale-[1.02] hover:bg-white/5">
+              <Link
+                key={m.id}
+                to={`/meetings/$id`}
+                params={{ id: m.id }}
+                className="glass group rounded-2xl p-5 transition-all hover:scale-[1.02] hover:bg-white/5"
+              >
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
                   <Calendar className="h-4 w-4" />
                   {new Date(m.scheduled_at).toLocaleDateString()}

@@ -1,16 +1,19 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 
 serve(async (req) => {
   // CORS for frontend invocation
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST',
-      'Access-Control-Expose-Headers': 'Content-Length, X-JSON',
-      'Access-Control-Allow-Headers': 'apikey,X-Client-Info, Content-Type, Authorization, Accept, Accept-Language, X-Authorization'
-    }});
+  if (req.method === "OPTIONS") {
+    return new Response("ok", {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST",
+        "Access-Control-Expose-Headers": "Content-Length, X-JSON",
+        "Access-Control-Allow-Headers":
+          "apikey,X-Client-Info, Content-Type, Authorization, Accept, Accept-Language, X-Authorization",
+      },
+    });
   }
 
   try {
@@ -22,7 +25,7 @@ serve(async (req) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${RESEND_API_KEY}`
+        Authorization: `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
         from: "Meeting Companion <onboarding@resend.dev>",
@@ -41,8 +44,8 @@ serve(async (req) => {
             </div>
             <p>Your AI Companion will automatically join and summarize this meeting for you. See you then!</p>
           </div>
-        `
-      })
+        `,
+      }),
     });
 
     if (!res.ok) {
@@ -61,4 +64,4 @@ serve(async (req) => {
       status: 400,
     });
   }
-})
+});

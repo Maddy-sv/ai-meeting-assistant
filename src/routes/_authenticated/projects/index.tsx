@@ -2,7 +2,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { FolderKanban, Plus, ArrowRight, Layers, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
@@ -31,7 +38,11 @@ function ProjectsPage() {
     setLoading(true);
     const { data: u } = await supabase.auth.getUser();
     if (u.user) {
-      const { data } = await supabase.from("projects").select("*").eq("owner_id", u.user.id).order("created_at", { ascending: false });
+      const { data } = await supabase
+        .from("projects")
+        .select("*")
+        .eq("owner_id", u.user.id)
+        .order("created_at", { ascending: false });
       setProjects((data as Project[]) || []);
     }
     setLoading(false);
@@ -50,7 +61,7 @@ function ProjectsPage() {
       const { error } = await supabase.from("projects").insert({
         name: name.trim(),
         description: description.trim() || null,
-        owner_id: u.user?.id
+        owner_id: u.user?.id,
       });
       if (error) throw error;
       toast.success("Project created!");
@@ -92,14 +103,32 @@ function ProjectsPage() {
             </DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4 pt-4">
               <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase text-muted-foreground">Project Name</label>
-                <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Marketing Q3" required className="bg-black/20 border-white/10" />
+                <label className="text-xs font-semibold uppercase text-muted-foreground">
+                  Project Name
+                </label>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Marketing Q3"
+                  required
+                  className="bg-black/20 border-white/10"
+                />
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase text-muted-foreground">Description (Optional)</label>
-                <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="e.g. Weekly team syncs..." className="bg-black/20 border-white/10" />
+                <label className="text-xs font-semibold uppercase text-muted-foreground">
+                  Description (Optional)
+                </label>
+                <Input
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="e.g. Weekly team syncs..."
+                  className="bg-black/20 border-white/10"
+                />
               </div>
-              <Button disabled={creating || !name.trim()} className="w-full gradient-bg rounded-full shadow-glow">
+              <Button
+                disabled={creating || !name.trim()}
+                className="w-full gradient-bg rounded-full shadow-glow"
+              >
                 {creating ? "Creating..." : "Create Project"}
               </Button>
             </form>
@@ -112,22 +141,35 @@ function ProjectsPage() {
           <Layers className="mx-auto mb-4 h-12 w-12 text-primary opacity-50" />
           <h2 className="text-xl font-bold">No projects yet</h2>
           <p className="mt-2 text-sm text-muted-foreground mb-6">
-            Create your first project to start grouping meetings and unlocking cumulative AI summaries.
+            Create your first project to start grouping meetings and unlocking cumulative AI
+            summaries.
           </p>
-          <Button onClick={() => setCreateOpen(true)} className="gradient-bg rounded-full shadow-glow">
+          <Button
+            onClick={() => setCreateOpen(true)}
+            className="gradient-bg rounded-full shadow-glow"
+          >
             <Plus className="mr-2 h-4 w-4" /> Create First Project
           </Button>
         </div>
       ) : (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {projects.map((p) => (
-            <Link key={p.id} to={`/projects/$id`} params={{ id: p.id }} className="glass group rounded-2xl p-6 transition-all hover:scale-[1.02] hover:bg-white/5 border border-white/5 hover:border-primary/50 relative overflow-hidden">
+            <Link
+              key={p.id}
+              to={`/projects/$id`}
+              params={{ id: p.id }}
+              className="glass group rounded-2xl p-6 transition-all hover:scale-[1.02] hover:bg-white/5 border border-white/5 hover:border-primary/50 relative overflow-hidden"
+            >
               <div className="absolute -right-4 -top-4 opacity-10 group-hover:opacity-20 transition-opacity">
                 <FolderKanban className="w-24 h-24" />
               </div>
               <h3 className="font-bold text-lg mb-2 relative z-10">{p.name}</h3>
-              {p.description && <p className="text-sm text-muted-foreground mb-6 relative z-10 line-clamp-2">{p.description}</p>}
-              
+              {p.description && (
+                <p className="text-sm text-muted-foreground mb-6 relative z-10 line-clamp-2">
+                  {p.description}
+                </p>
+              )}
+
               <div className="mt-6 flex items-center justify-between text-xs text-muted-foreground relative z-10 font-medium group-hover:text-primary transition-colors">
                 <span>View Details</span>
                 <ArrowRight className="h-4 w-4 transform group-hover:translate-x-1 transition-transform" />

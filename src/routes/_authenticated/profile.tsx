@@ -13,7 +13,15 @@ export const Route = createFileRoute("/_authenticated/profile")({
   component: ProfilePage,
 });
 
-type Profile = { id: string; full_name: string | null; avatar_url: string | null; company: string | null; time_zone: string | null; language: string | null; subscription_plan: string };
+type Profile = {
+  id: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  company: string | null;
+  time_zone: string | null;
+  language: string | null;
+  subscription_plan: string;
+};
 
 function ProfilePage() {
   const [p, setP] = useState<Profile | null>(null);
@@ -25,7 +33,11 @@ function ProfilePage() {
       const { data: u } = await supabase.auth.getUser();
       if (!u.user) return;
       setEmail(u.user.email ?? "");
-      const { data } = await supabase.from("profiles").select("*").eq("id", u.user.id).maybeSingle();
+      const { data } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", u.user.id)
+        .maybeSingle();
       if (data) {
         setP(data as Profile);
       } else {
@@ -37,16 +49,19 @@ function ProfilePage() {
           company: meta?.company || "",
           time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
           language: "en",
-          subscription_plan: "free"
+          subscription_plan: "free",
         };
         setP(initialProfile);
-        supabase.from("profiles").upsert({
-          id: initialProfile.id,
-          full_name: initialProfile.full_name,
-          company: initialProfile.company,
-          time_zone: initialProfile.time_zone,
-          language: initialProfile.language,
-        }).then(() => {});
+        supabase
+          .from("profiles")
+          .upsert({
+            id: initialProfile.id,
+            full_name: initialProfile.full_name,
+            company: initialProfile.company,
+            time_zone: initialProfile.time_zone,
+            language: initialProfile.language,
+          })
+          .then(() => {});
       }
     })();
   }, []);
@@ -65,7 +80,7 @@ function ProfilePage() {
         company: p.company,
         time_zone: p.time_zone,
         language: p.language,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       });
 
       if (pErr) throw pErr;
@@ -76,7 +91,7 @@ function ProfilePage() {
           full_name: p.full_name,
           name: p.full_name,
           company: p.company,
-        }
+        },
       });
 
       toast.success("Profile saved successfully");
@@ -94,7 +109,9 @@ function ProfilePage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <header>
         <h1 className="text-3xl font-black tracking-tight">Your profile</h1>
-        <p className="text-sm text-muted-foreground">Update your account, preferences and connected services.</p>
+        <p className="text-sm text-muted-foreground">
+          Update your account, preferences and connected services.
+        </p>
       </header>
 
       <div className="glass flex items-center gap-4 rounded-2xl p-6">
@@ -110,29 +127,52 @@ function ProfilePage() {
       <div className="glass grid gap-4 rounded-2xl p-6 md:grid-cols-2">
         <div>
           <Label>Full name</Label>
-          <Input className="glass mt-1 border-white/10" value={p.full_name ?? ""} onChange={(e) => setP({ ...p, full_name: e.target.value })} />
+          <Input
+            className="glass mt-1 border-white/10"
+            value={p.full_name ?? ""}
+            onChange={(e) => setP({ ...p, full_name: e.target.value })}
+          />
         </div>
         <div>
           <Label>Company</Label>
-          <Input className="glass mt-1 border-white/10" value={p.company ?? ""} onChange={(e) => setP({ ...p, company: e.target.value })} />
+          <Input
+            className="glass mt-1 border-white/10"
+            value={p.company ?? ""}
+            onChange={(e) => setP({ ...p, company: e.target.value })}
+          />
         </div>
         <div>
           <Label>Time zone</Label>
-          <Input className="glass mt-1 border-white/10" value={p.time_zone ?? ""} onChange={(e) => setP({ ...p, time_zone: e.target.value })} />
+          <Input
+            className="glass mt-1 border-white/10"
+            value={p.time_zone ?? ""}
+            onChange={(e) => setP({ ...p, time_zone: e.target.value })}
+          />
         </div>
         <div>
           <Label>Language</Label>
-          <Input className="glass mt-1 border-white/10" value={p.language ?? ""} onChange={(e) => setP({ ...p, language: e.target.value })} />
+          <Input
+            className="glass mt-1 border-white/10"
+            value={p.language ?? ""}
+            onChange={(e) => setP({ ...p, language: e.target.value })}
+          />
         </div>
         <div className="md:col-span-2">
-          <Button className="gradient-bg rounded-full shadow-glow" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save changes"}</Button>
+          <Button className="gradient-bg rounded-full shadow-glow" onClick={save} disabled={saving}>
+            {saving ? "Saving…" : "Save changes"}
+          </Button>
         </div>
       </div>
 
       <div className="glass rounded-2xl p-6">
         <h3 className="mb-3 font-semibold">Connected accounts</h3>
         <div className="space-y-2">
-          <Row icon={<Mail className="h-4 w-4" />} name="Google" desc="Sign-in, Calendar, Gmail" connected />
+          <Row
+            icon={<Mail className="h-4 w-4" />}
+            name="Google"
+            desc="Sign-in, Calendar, Gmail"
+            connected
+          />
           <Row icon={<Mail className="h-4 w-4" />} name="Microsoft" desc="Teams integration" />
         </div>
       </div>
@@ -140,7 +180,17 @@ function ProfilePage() {
   );
 }
 
-function Row({ icon, name, desc, connected }: { icon: React.ReactNode; name: string; desc: string; connected?: boolean }) {
+function Row({
+  icon,
+  name,
+  desc,
+  connected,
+}: {
+  icon: React.ReactNode;
+  name: string;
+  desc: string;
+  connected?: boolean;
+}) {
   return (
     <div className="glass flex items-center gap-3 rounded-xl p-3">
       <div className="grid h-10 w-10 place-items-center rounded-lg bg-white/5">{icon}</div>
@@ -149,9 +199,14 @@ function Row({ icon, name, desc, connected }: { icon: React.ReactNode; name: str
         <div className="text-xs text-muted-foreground">{desc}</div>
       </div>
       {connected ? (
-        <Badge variant="outline" className="border-white/10"><CheckCircle2 className="mr-1 h-3 w-3 text-green-500" />Connected</Badge>
+        <Badge variant="outline" className="border-white/10">
+          <CheckCircle2 className="mr-1 h-3 w-3 text-green-500" />
+          Connected
+        </Badge>
       ) : (
-        <Button variant="outline" size="sm" className="glass rounded-full border-white/10">Connect</Button>
+        <Button variant="outline" size="sm" className="glass rounded-full border-white/10">
+          Connect
+        </Button>
       )}
     </div>
   );

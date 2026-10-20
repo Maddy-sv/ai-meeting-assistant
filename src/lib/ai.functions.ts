@@ -19,7 +19,7 @@ const AVAILABLE_MODELS = [
 
 async function generateWithRetry(ai: any, params: any, maxRetries = 3) {
   const modelsToTry = params.model
-    ? [params.model, ...AVAILABLE_MODELS.filter(m => m !== params.model)]
+    ? [params.model, ...AVAILABLE_MODELS.filter((m) => m !== params.model)]
     : AVAILABLE_MODELS;
 
   let lastErr: any = null;
@@ -40,15 +40,17 @@ async function generateWithRetry(ai: any, params: any, maxRetries = 3) {
           msg.includes("API key not valid");
 
         if (isAuthError) {
-          throw new Error("Invalid Gemini API Key: Please check GEMINI_API_KEY in your .env file. It must be a valid API key starting with 'AIzaSy...' from Google AI Studio (https://aistudio.google.com/app/apikey).");
+          throw new Error(
+            "Invalid Gemini API Key: Please check GEMINI_API_KEY in your .env file. It must be a valid API key starting with 'AIzaSy...' from Google AI Studio (https://aistudio.google.com/app/apikey).",
+          );
         }
 
-        const isRateOrDemandError = 
-          msg.includes("503") || 
-          msg.includes("429") || 
-          msg.includes("RESOURCE_EXHAUSTED") || 
-          msg.includes("UNAVAILABLE") || 
-          msg.includes("quota") || 
+        const isRateOrDemandError =
+          msg.includes("503") ||
+          msg.includes("429") ||
+          msg.includes("RESOURCE_EXHAUSTED") ||
+          msg.includes("UNAVAILABLE") ||
+          msg.includes("quota") ||
           msg.includes("Quota") ||
           msg.includes("exceeded") ||
           msg.includes("rate-limit") ||
@@ -59,7 +61,12 @@ async function generateWithRetry(ai: any, params: any, maxRetries = 3) {
 
         if (isRateOrDemandError) {
           // If this model hit a daily quota (429 RESOURCE_EXHAUSTED), switch to next available candidate model immediately
-          if (msg.includes("RESOURCE_EXHAUSTED") || msg.includes("quota") || msg.includes("Quota") || msg.includes("429")) {
+          if (
+            msg.includes("RESOURCE_EXHAUSTED") ||
+            msg.includes("quota") ||
+            msg.includes("Quota") ||
+            msg.includes("429")
+          ) {
             console.warn(`Model ${model} hit quota limit. Failing over to next model...`);
             break;
           }
@@ -73,11 +80,13 @@ async function generateWithRetry(ai: any, params: any, maxRetries = 3) {
               if (!isNaN(parsed) && parsed > 0) delayMs = Math.max(delayMs, parsed + 400);
             } else if (sMatch && sMatch[1]) {
               const parsed = parseFloat(sMatch[1]);
-              if (!isNaN(parsed) && parsed > 0) delayMs = Math.max(delayMs, (parsed * 1000) + 400);
+              if (!isNaN(parsed) && parsed > 0) delayMs = Math.max(delayMs, parsed * 1000 + 400);
             }
 
-            console.warn(`Gemini API rate limit on ${model}. Retrying in ${(delayMs/1000).toFixed(1)}s (attempt ${i + 1}/${maxRetries})...`);
-            await new Promise(r => setTimeout(r, delayMs));
+            console.warn(
+              `Gemini API rate limit on ${model}. Retrying in ${(delayMs / 1000).toFixed(1)}s (attempt ${i + 1}/${maxRetries})...`,
+            );
+            await new Promise((r) => setTimeout(r, delayMs));
           }
         } else {
           // Non-rate error (e.g. 404 model not found) -> try next model
@@ -139,7 +148,11 @@ export const summarizeMeeting = createServerFn({ method: "POST" })
       } satisfies SummaryPayload;
     }
 
-    const { data: hostProf } = await supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle();
+    const { data: hostProf } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", userId)
+      .maybeSingle();
     const hostName = hostProf?.full_name?.trim() || "Host";
 
     const ai = new GoogleGenAI({ apiKey: key });
@@ -198,22 +211,25 @@ TASK:
         };
 
         const cleanTimeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Cleaning step timeout")), 12000)
+          setTimeout(() => reject(new Error("Cleaning step timeout")), 12000),
         );
         const cleanRes: any = await Promise.race([
           generateWithRetry(ai, {
             contents: [{ text: cleanPrompt }],
             config: cleanConfig,
           }),
-          cleanTimeoutPromise
+          cleanTimeoutPromise,
         ]);
 
         const parsedClean = JSON.parse(cleanRes.text || "{}");
-        const cleanedList: Array<{ speaker: string; content: string }> = parsedClean.cleaned_transcripts || [];
+        const cleanedList: Array<{ speaker: string; content: string }> =
+          parsedClean.cleaned_transcripts || [];
 
         if (cleanedList.length > 0) {
-          cleanedTranscript = cleanedList.map(item => `${item.speaker}: ${item.content}`).join("\n");
-          
+          cleanedTranscript = cleanedList
+            .map((item) => `${item.speaker}: ${item.content}`)
+            .join("\n");
+
           // Automatically update the transcripts table in the database so the UI also shows the clean version
           try {
             const toInsert = cleanedList.map((item, idx) => ({
@@ -223,7 +239,7 @@ TASK:
               segment_index: idx,
               spoken_at: new Date(Date.now() - (cleanedList.length - idx) * 15000).toISOString(),
             }));
-            
+
             await supabase.from("transcripts").delete().eq("meeting_id", data.meetingId);
             const { error: insErr } = await supabase.from("transcripts").insert(toInsert);
             if (insErr) console.error("Failed to insert auto-cleaned transcripts:", insErr);
@@ -261,7 +277,7 @@ CRITICAL RULES FOR ACCURACY & CROSS-MEETING CONSISTENCY:
 - Strategic Decisions: Do not repeat or duplicate decisions; ensure each decision is distinct.`;
 
     const parts: any[] = [{ text: user }];
-    
+
     const screenshotsToUse = (data.screenshots || []).slice(-2);
     if (screenshotsToUse.length > 0) {
       for (const base64Img of screenshotsToUse) {
@@ -269,12 +285,12 @@ CRITICAL RULES FOR ACCURACY & CROSS-MEETING CONSISTENCY:
         parts.push({
           inlineData: {
             data: b64,
-            mimeType: "image/jpeg"
-          }
+            mimeType: "image/jpeg",
+          },
         });
       }
     }
-    
+
     const summaryConfig = {
       systemInstruction: system,
       responseMimeType: "application/json",
@@ -285,44 +301,44 @@ CRITICAL RULES FOR ACCURACY & CROSS-MEETING CONSISTENCY:
           key_points: { type: Type.ARRAY, items: { type: Type.STRING } },
           risks: { type: Type.ARRAY, items: { type: Type.STRING } },
           follow_ups: { type: Type.ARRAY, items: { type: Type.STRING } },
-          action_items: { 
-            type: Type.ARRAY, 
-            items: { 
-              type: Type.OBJECT, 
-              properties: { 
-                title: { type: Type.STRING }, 
-                assignee: { type: Type.STRING, nullable: true }, 
+          action_items: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                assignee: { type: Type.STRING, nullable: true },
                 deadline: { type: Type.STRING, nullable: true },
-                status: { type: Type.STRING, nullable: true }
-              } 
-            } 
+                status: { type: Type.STRING, nullable: true },
+              },
+            },
           },
-          decisions: { 
-            type: Type.ARRAY, 
-            items: { 
-              type: Type.OBJECT, 
-              properties: { 
-                description: { type: Type.STRING }, 
-                made_by: { type: Type.STRING, nullable: true } 
-              } 
-            } 
-          }
+          decisions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                description: { type: Type.STRING },
+                made_by: { type: Type.STRING, nullable: true },
+              },
+            },
+          },
         },
-      }
+      },
     };
 
     let response;
     try {
       response = await generateWithRetry(ai, {
         contents: parts,
-        config: summaryConfig
+        config: summaryConfig,
       });
     } catch (primaryErr) {
       if (parts.length > 1) {
         console.warn("Retrying with text-only transcript due to quota limits...");
         response = await generateWithRetry(ai, {
           contents: [{ text: user }],
-          config: summaryConfig
+          config: summaryConfig,
         });
       } else {
         throw primaryErr;
@@ -370,7 +386,7 @@ CRITICAL RULES FOR ACCURACY & CROSS-MEETING CONSISTENCY:
         title: f,
         assignee: hostName,
         deadline: null,
-        status: "pending"
+        status: "pending",
       }));
     }
 
@@ -385,7 +401,9 @@ CRITICAL RULES FOR ACCURACY & CROSS-MEETING CONSISTENCY:
             meeting_id: data.meetingId,
             title: a.title,
             assignee: normalizeAssignee(a.assignee),
-            deadline: a.deadline ? (resolveDeadlineToISODate(a.deadline, meetingRef) || a.deadline) : null,
+            deadline: a.deadline
+              ? resolveDeadlineToISODate(a.deadline, meetingRef) || a.deadline
+              : null,
             status: a.status === "done" ? "done" : "pending",
           };
         }),
@@ -421,12 +439,25 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
     const key = process.env.GEMINI_API_KEY;
     if (!key) throw new Error("Missing GEMINI_API_KEY");
 
-    const [{ data: meeting }, { data: hostProf }, { data: segs }, { data: summary }] = await Promise.all([
-      supabase.from("meetings").select("id, title, host_id, scheduled_at, created_at").eq("id", data.meetingId).single(),
-      supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
-      supabase.from("transcripts").select("speaker, content").eq("meeting_id", data.meetingId).order("segment_index", { ascending: true }),
-      supabase.from("ai_summaries").select("executive_summary, key_points, follow_ups").eq("meeting_id", data.meetingId).maybeSingle(),
-    ]);
+    const [{ data: meeting }, { data: hostProf }, { data: segs }, { data: summary }] =
+      await Promise.all([
+        supabase
+          .from("meetings")
+          .select("id, title, host_id, scheduled_at, created_at")
+          .eq("id", data.meetingId)
+          .single(),
+        supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
+        supabase
+          .from("transcripts")
+          .select("speaker, content")
+          .eq("meeting_id", data.meetingId)
+          .order("segment_index", { ascending: true }),
+        supabase
+          .from("ai_summaries")
+          .select("executive_summary, key_points, follow_ups")
+          .eq("meeting_id", data.meetingId)
+          .maybeSingle(),
+      ]);
 
     if (!meeting) throw new Error("Meeting not found");
 
@@ -477,7 +508,8 @@ Return JSON with this exact shape:
       const response = await generateWithRetry(ai, {
         contents: [{ text: userPrompt }],
         config: {
-          systemInstruction: "You are an expert AI meeting assistant. Extract exact, actionable tasks with assignees, status, and deadlines, and distinct strategic decisions from meeting summaries and transcripts.",
+          systemInstruction:
+            "You are an expert AI meeting assistant. Extract exact, actionable tasks with assignees, status, and deadlines, and distinct strategic decisions from meeting summaries and transcripts.",
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -490,10 +522,10 @@ Return JSON with this exact shape:
                     title: { type: Type.STRING },
                     assignee: { type: Type.STRING, nullable: true },
                     deadline: { type: Type.STRING, nullable: true },
-                    status: { type: Type.STRING, nullable: true }
+                    status: { type: Type.STRING, nullable: true },
                   },
-                  required: ["title"]
-                }
+                  required: ["title"],
+                },
               },
               decisions: {
                 type: Type.ARRAY,
@@ -501,14 +533,14 @@ Return JSON with this exact shape:
                   type: Type.OBJECT,
                   properties: {
                     description: { type: Type.STRING },
-                    made_by: { type: Type.STRING, nullable: true }
+                    made_by: { type: Type.STRING, nullable: true },
                   },
-                  required: ["description"]
-                }
-              }
-            }
-          }
-        }
+                  required: ["description"],
+                },
+              },
+            },
+          },
+        },
       });
       parsed = JSON.parse(response.text || "{}");
     } catch (e) {
@@ -544,28 +576,38 @@ Return JSON with this exact shape:
           items.push({
             title: f,
             assignee: hostName,
-            deadline: dLine
+            deadline: dLine,
           });
         }
       }
 
       const allText = `${summaryText}. ${((summary?.key_points || []) as string[]).join(". ")}`;
-      const sentences = allText.split(/\. |\.\n/).map(s => s.trim()).filter(Boolean);
+      const sentences = allText
+        .split(/\. |\.\n/)
+        .map((s) => s.trim())
+        .filter(Boolean);
       for (const s of sentences) {
         const lower = s.toLowerCase();
         if (lower.includes("registration") || lower.includes("participant list")) {
           items.push({
             title: "Handle registration and prepare participant list",
             assignee: hostName,
-            deadline: friDate
+            deadline: friDate,
           });
         } else if (lower.includes("decoration")) {
           items.push({
             title: "Take care of decoration for the event",
             assignee: "Remote Participant",
-            deadline: null
+            deadline: null,
           });
-        } else if (lower.includes("agreed to") || lower.includes("will ") || lower.includes("prepare") || lower.includes("handle") || lower.includes("task") || lower.includes("owns")) {
+        } else if (
+          lower.includes("agreed to") ||
+          lower.includes("will ") ||
+          lower.includes("prepare") ||
+          lower.includes("handle") ||
+          lower.includes("task") ||
+          lower.includes("owns")
+        ) {
           let clean = s;
           let assignee = hostName;
           if (lower.includes("remote participant will")) {
@@ -576,7 +618,10 @@ Return JSON with this exact shape:
             clean = s.replace(/sumeet( made)? will/i, "").trim();
           }
           clean = clean.charAt(0).toUpperCase() + clean.slice(1);
-          if (clean.length > 5 && !items.some((it: any) => it.title.toLowerCase() === clean.toLowerCase())) {
+          if (
+            clean.length > 5 &&
+            !items.some((it: any) => it.title.toLowerCase() === clean.toLowerCase())
+          ) {
             let dLine = null;
             if (lower.includes("friday")) dLine = friDate;
             else if (lower.includes("wednesday")) dLine = wedDate;
@@ -588,14 +633,17 @@ Return JSON with this exact shape:
     }
 
     if (decisions.length === 0 && summaryText) {
-      if (summaryText.toLowerCase().includes("college event") || summaryText.toLowerCase().includes("event")) {
+      if (
+        summaryText.toLowerCase().includes("college event") ||
+        summaryText.toLowerCase().includes("event")
+      ) {
         decisions.push({
           description: "Divide college event responsibilities between registration and decoration",
-          made_by: "Both Participants"
+          made_by: "Both Participants",
         });
         decisions.push({
           description: "Complete all assigned event preparation tasks by Friday",
-          made_by: "Both Participants"
+          made_by: "Both Participants",
         });
       }
     }
@@ -615,11 +663,16 @@ Return JSON with this exact shape:
           meeting_id: data.meetingId,
           title: a.title,
           assignee: normalizeAssignee(a.assignee),
-          deadline: a.deadline ? (resolveDeadlineToISODate(a.deadline, meetingRef) || a.deadline) : null,
-          status
+          deadline: a.deadline
+            ? resolveDeadlineToISODate(a.deadline, meetingRef) || a.deadline
+            : null,
+          status,
         };
       });
-      const { data: inserted, error: iErr } = await supabase.from("action_items").insert(toInsert).select();
+      const { data: inserted, error: iErr } = await supabase
+        .from("action_items")
+        .insert(toInsert)
+        .select();
       if (iErr) {
         console.warn("action_items insert.select() failed, retrying plain insert:", iErr);
         await supabase.from("action_items").insert(toInsert);
@@ -637,9 +690,12 @@ Return JSON with this exact shape:
       const decToInsert = uniqueDecisions.map((d: any) => ({
         meeting_id: data.meetingId,
         description: d.description,
-        made_by: d.made_by || "Both Participants"
+        made_by: d.made_by || "Both Participants",
       }));
-      const { data: decIns, error: dErr } = await supabase.from("decisions").insert(decToInsert).select();
+      const { data: decIns, error: dErr } = await supabase
+        .from("decisions")
+        .insert(decToInsert)
+        .select();
       if (dErr) {
         console.warn("decisions insert.select() failed, retrying plain insert:", dErr);
         await supabase.from("decisions").insert(decToInsert);
@@ -651,7 +707,7 @@ Return JSON with this exact shape:
 
     return {
       action_items: insertedActions,
-      decisions: insertedDecisions
+      decisions: insertedDecisions,
     };
   });
 
@@ -667,34 +723,40 @@ export const generateMeetingRecaps = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
 
     // Fetch meeting, summary, tasks, and participants
-    const [{ data: meeting }, { data: summary }, { data: actions }, { data: participants }] = await Promise.all([
-      supabase.from("meetings").select("*").eq("id", data.meetingId).single(),
-      supabase.from("ai_summaries").select("*").eq("meeting_id", data.meetingId).single(),
-      supabase.from("action_items").select("*").eq("meeting_id", data.meetingId),
-      supabase.from("participants").select("*").eq("meeting_id", data.meetingId),
-    ]);
+    const [{ data: meeting }, { data: summary }, { data: actions }, { data: participants }] =
+      await Promise.all([
+        supabase.from("meetings").select("*").eq("id", data.meetingId).single(),
+        supabase.from("ai_summaries").select("*").eq("meeting_id", data.meetingId).single(),
+        supabase.from("action_items").select("*").eq("meeting_id", data.meetingId),
+        supabase.from("participants").select("*").eq("meeting_id", data.meetingId),
+      ]);
 
     if (!meeting || !summary) throw new Error("Meeting or summary not found");
 
-    const recaps: Array<{ participantName: string; email: string | null; subject: string; body: string }> = [];
+    const recaps: Array<{
+      participantName: string;
+      email: string | null;
+      subject: string;
+      body: string;
+    }> = [];
 
     // For each participant, generate a personalized email
     for (const p of participants || []) {
       const pName = p.name || "Participant";
       // Filter tasks assigned to this person (fuzzy match)
-      const myTasks = (actions || []).filter(a => 
-        a.assignee && a.assignee.toLowerCase().includes(pName.toLowerCase().split(" ")[0])
+      const myTasks = (actions || []).filter(
+        (a) => a.assignee && a.assignee.toLowerCase().includes(pName.toLowerCase().split(" ")[0]),
       );
-      
-      const otherTasks = (actions || []).filter(a => !myTasks.includes(a));
+
+      const otherTasks = (actions || []).filter((a) => !myTasks.includes(a));
 
       let body = `Hi ${pName},\n\nHere is the recap from our meeting: "${meeting.title}".\n\n`;
       body += `**Executive Summary:**\n${summary.executive_summary}\n\n`;
-      
+
       if (myTasks.length > 0) {
         body += `🚨 **YOUR ACTION ITEMS:**\n`;
-        myTasks.forEach(t => {
-          body += `- [ ] ${t.title} (Due: ${t.deadline ? new Date(t.deadline).toLocaleDateString() : 'TBD'})\n`;
+        myTasks.forEach((t) => {
+          body += `- [ ] ${t.title} (Due: ${t.deadline ? new Date(t.deadline).toLocaleDateString() : "TBD"})\n`;
         });
         body += `\n`;
       } else {
@@ -703,8 +765,8 @@ export const generateMeetingRecaps = createServerFn({ method: "POST" })
 
       if (otherTasks.length > 0) {
         body += `**Other Action Items:**\n`;
-        otherTasks.forEach(t => {
-          body += `- ${t.title} (Assigned to: ${t.assignee || 'Unassigned'})\n`;
+        otherTasks.forEach((t) => {
+          body += `- ${t.title} (Assigned to: ${t.assignee || "Unassigned"})\n`;
         });
         body += `\n`;
       }
@@ -715,7 +777,7 @@ export const generateMeetingRecaps = createServerFn({ method: "POST" })
         participantName: pName,
         email: p.email,
         subject: `Meeting Recap: ${meeting.title}`,
-        body
+        body,
       });
     }
 
@@ -745,23 +807,27 @@ export const generateProjectSummary = createServerFn({ method: "POST" })
       .select("id, title, scheduled_at")
       .eq("project_id", data.projectId)
       .order("scheduled_at", { ascending: true });
-    
+
     if (!meetings || meetings.length === 0) {
       return {
         progress_report: "No meetings found for this project yet.",
-        suggested_agenda: []
+        suggested_agenda: [],
       };
     }
 
-    const meetingIds = meetings.map(m => m.id);
+    const meetingIds = meetings.map((m) => m.id);
 
     // Fetch all context across project meetings
-    const [{ data: summaries }, { data: actions }, { data: decisions }, { data: transcripts }] = await Promise.all([
-      supabase.from("ai_summaries").select("*").in("meeting_id", meetingIds),
-      supabase.from("action_items").select("*").in("meeting_id", meetingIds),
-      supabase.from("decisions").select("*").in("meeting_id", meetingIds),
-      supabase.from("transcripts").select("meeting_id, speaker, content").in("meeting_id", meetingIds),
-    ]);
+    const [{ data: summaries }, { data: actions }, { data: decisions }, { data: transcripts }] =
+      await Promise.all([
+        supabase.from("ai_summaries").select("*").in("meeting_id", meetingIds),
+        supabase.from("action_items").select("*").in("meeting_id", meetingIds),
+        supabase.from("decisions").select("*").in("meeting_id", meetingIds),
+        supabase
+          .from("transcripts")
+          .select("meeting_id, speaker, content")
+          .in("meeting_id", meetingIds),
+      ]);
 
     // Build verified ground-truth cumulative summary from persisted records
     const verifiedResult = buildVerifiedCumulativeSummary(
@@ -770,7 +836,7 @@ export const generateProjectSummary = createServerFn({ method: "POST" })
       summaries || [],
       actions || [],
       decisions || [],
-      transcripts || []
+      transcripts || [],
     );
 
     // If no Gemini API key, return the verified result directly
@@ -781,7 +847,7 @@ export const generateProjectSummary = createServerFn({ method: "POST" })
         verified_completed: verifiedResult.verified_completed,
         verified_pending: verifiedResult.verified_pending,
         verified_decisions: verifiedResult.verified_decisions,
-        conflicts: verifiedResult.conflicts
+        conflicts: verifiedResult.conflicts,
       };
     }
 
@@ -798,7 +864,7 @@ CRITICAL GROUND TRUTH RULES:
 ${verifiedResult.progress_report}
 
 Outstanding Commitments to Preserve:
-${verifiedResult.verified_pending.map(t => `- [${t.status}] ${t.title} (${t.assignee}, Due: ${t.deadline || 'upcoming'})`).join("\n") || "None"}
+${verifiedResult.verified_pending.map((t) => `- [${t.status}] ${t.title} (${t.assignee}, Due: ${t.deadline || "upcoming"})`).join("\n") || "None"}
 
 Return JSON conforming strictly to the ground-truth facts.`;
 
@@ -813,24 +879,30 @@ Return JSON conforming strictly to the ground-truth facts.`;
             type: Type.OBJECT,
             properties: {
               progress_report: { type: Type.STRING },
-              suggested_agenda: { type: Type.ARRAY, items: { type: Type.STRING } }
-            }
-          }
-        }
+              suggested_agenda: { type: Type.ARRAY, items: { type: Type.STRING } },
+            },
+          },
+        },
       });
 
       const parsed = JSON.parse(response.text || "{}");
       if (parsed.progress_report) {
         let progressReport = parsed.progress_report;
         // Verify that the Friday review commitment was not dropped by AI
-        const hasFridayReview = progressReport.toLowerCase().includes("friday") || progressReport.toLowerCase().includes("joint review");
-        if (!hasFridayReview && verifiedResult.verified_pending.some(p => p.canonical_key === "task:joint_review")) {
+        const hasFridayReview =
+          progressReport.toLowerCase().includes("friday") ||
+          progressReport.toLowerCase().includes("joint review");
+        if (
+          !hasFridayReview &&
+          verifiedResult.verified_pending.some((p) => p.canonical_key === "task:joint_review")
+        ) {
           progressReport += `\n\n#### ⏳ Preserved Commitments:\n- **Joint review of all completed deliverables**: Scheduled for **Friday** with Shreyash & Sumeet Made.`;
         }
 
-        const agenda = Array.isArray(parsed.suggested_agenda) && parsed.suggested_agenda.length > 0
-          ? parsed.suggested_agenda
-          : verifiedResult.suggested_agenda;
+        const agenda =
+          Array.isArray(parsed.suggested_agenda) && parsed.suggested_agenda.length > 0
+            ? parsed.suggested_agenda
+            : verifiedResult.suggested_agenda;
 
         return {
           progress_report: progressReport,
@@ -838,7 +910,7 @@ Return JSON conforming strictly to the ground-truth facts.`;
           verified_completed: verifiedResult.verified_completed,
           verified_pending: verifiedResult.verified_pending,
           verified_decisions: verifiedResult.verified_decisions,
-          conflicts: verifiedResult.conflicts
+          conflicts: verifiedResult.conflicts,
         };
       }
     } catch (err) {
@@ -851,13 +923,13 @@ Return JSON conforming strictly to the ground-truth facts.`;
       verified_completed: verifiedResult.verified_completed,
       verified_pending: verifiedResult.verified_pending,
       verified_decisions: verifiedResult.verified_decisions,
-      conflicts: verifiedResult.conflicts
+      conflicts: verifiedResult.conflicts,
     };
   });
 
 export const askChatBot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: { messages: {role: "user" | "assistant", content: string}[] }) => {
+  .inputValidator((input: { messages: { role: "user" | "assistant"; content: string }[] }) => {
     if (!input?.messages) throw new Error("Messages are required");
     return input;
   })
@@ -867,47 +939,52 @@ export const askChatBot = createServerFn({ method: "POST" })
     if (!key) throw new Error("Missing GEMINI_API_KEY");
 
     // Fetch context
-    const [{ data: meetings }, { data: summaries }, { data: actions }, { data: decisions }] = await Promise.all([
-      supabase.from("meetings").select("id, title, scheduled_at"),
-      supabase.from("ai_summaries").select("meeting_id, executive_summary"),
-      supabase.from("action_items").select("*"),
-      supabase.from("decisions").select("*"),
-    ]);
+    const [{ data: meetings }, { data: summaries }, { data: actions }, { data: decisions }] =
+      await Promise.all([
+        supabase.from("meetings").select("id, title, scheduled_at"),
+        supabase.from("ai_summaries").select("meeting_id, executive_summary"),
+        supabase.from("action_items").select("*"),
+        supabase.from("decisions").select("*"),
+      ]);
 
     let contextData = "DATABASE OF ALL YOUR PAST MEETINGS, DECISIONS, AND ACTION ITEMS:\n\n";
-    (meetings || []).forEach(m => {
+    (meetings || []).forEach((m) => {
       contextData += `MEETING: "${m.title}" on ${m.scheduled_at}\n`;
-      const s = (summaries || []).find(x => x.meeting_id === m.id);
+      const s = (summaries || []).find((x) => x.meeting_id === m.id);
       if (s) contextData += `SUMMARY: ${s.executive_summary}\n`;
-      
-      const md = (decisions || []).filter(x => x.meeting_id === m.id);
-      if (md.length > 0) contextData += `DECISIONS MADE: ${md.map(d => d.description).join(" | ")}\n`;
-      
+
+      const md = (decisions || []).filter((x) => x.meeting_id === m.id);
+      if (md.length > 0)
+        contextData += `DECISIONS MADE: ${md.map((d) => d.description).join(" | ")}\n`;
+
       contextData += "\n";
     });
 
-    const pending = (actions || []).filter(a => a.status !== "done");
+    const pending = (actions || []).filter((a) => a.status !== "done");
     if (pending.length > 0) {
       contextData += "OUTSTANDING ACTION ITEMS (TASKS TO DO):\n";
-      pending.forEach(a => contextData += `- ${a.title} (Assigned to: ${a.assignee || 'Unassigned'}, Due: ${a.deadline || 'None'})\n`);
+      pending.forEach(
+        (a) =>
+          (contextData += `- ${a.title} (Assigned to: ${a.assignee || "Unassigned"}, Due: ${a.deadline || "None"})\n`),
+      );
     }
 
     const system = `You are a highly intelligent AI Meeting Companion. Your job is to answer questions about the user's past meetings, decisions, and tasks based strictly on the provided DATABASE context. Be conversational, helpful, and concise. Do NOT make up facts. If the information isn't in the database, say so politely.\n\n${contextData}`;
 
     const ai = new GoogleGenAI({ apiKey: key });
-    
+
     // Format messages for Gemini
     // Gemini chat API format needs contents array
-    const contents = data.messages.map(m => ({
+    const contents = data.messages.map((m) => ({
       role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }]
+      parts: [{ text: m.content }],
     }));
 
     const response = await generateWithRetry(ai, {
       contents: contents,
       config: {
         systemInstruction: system,
-      }
+      },
     });
 
     return response.text || "I'm sorry, I couldn't generate a response.";
@@ -915,30 +992,42 @@ export const askChatBot = createServerFn({ method: "POST" })
 
 export const transcribeRemoteAudio = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: { meetingId: string; base64Audio: string; segmentIndex: number; screenshotBase64?: string; knownParticipants?: string[]; hostName?: string }) => {
-    if (!input?.meetingId || !input?.base64Audio) {
-      throw new Error("meetingId and base64Audio are required");
-    }
-    return input;
-  })
+  .inputValidator(
+    (input: {
+      meetingId: string;
+      base64Audio: string;
+      segmentIndex: number;
+      screenshotBase64?: string;
+      knownParticipants?: string[];
+      hostName?: string;
+    }) => {
+      if (!input?.meetingId || !input?.base64Audio) {
+        throw new Error("meetingId and base64Audio are required");
+      }
+      return input;
+    },
+  )
   .handler(async ({ data, context }) => {
     const { supabase } = context;
     const key = process.env.GEMINI_API_KEY;
     if (!key) throw new Error("Missing GEMINI_API_KEY");
 
     const ai = new GoogleGenAI({ apiKey: key });
-    
+
     // The base64 string usually includes the data URL prefix (e.g., data:audio/webm;base64,...)
     // We strip it if present.
-    const b64 = data.base64Audio.replace(/^data:audio\/\w+;codecs=[^;]+;base64,|^data:audio\/\w+;base64,/, "");
+    const b64 = data.base64Audio.replace(
+      /^data:audio\/\w+;codecs=[^;]+;base64,|^data:audio\/\w+;base64,/,
+      "",
+    );
 
     const parts: any[] = [
       {
         inlineData: {
           data: b64,
           mimeType: "audio/webm",
-        }
-      }
+        },
+      },
     ];
 
     if (data.screenshotBase64) {
@@ -946,13 +1035,14 @@ export const transcribeRemoteAudio = createServerFn({ method: "POST" })
         inlineData: {
           data: data.screenshotBase64.replace(/^data:image\/jpeg;base64,/, ""),
           mimeType: "image/jpeg",
-        }
+        },
       });
     }
 
-    const participantsInfo = (data.knownParticipants && data.knownParticipants.length > 0)
-      ? `Meeting attendees/participants: ${data.knownParticipants.join(", ")}.`
-      : "";
+    const participantsInfo =
+      data.knownParticipants && data.knownParticipants.length > 0
+        ? `Meeting attendees/participants: ${data.knownParticipants.join(", ")}.`
+        : "";
 
     const systemPrompt = `You are an expert real-time meeting transcriber and speaker identification engine.
 Transcribe the speech and automatically identify speakers using the audio and the Google Meet screen capture.
@@ -963,7 +1053,7 @@ Rules for Automatic Speaker Identification:
    - Google Meet live captions (e.g. "Anmol Patel: ...", "You: ...")
    - Google Meet participant video tile labels (e.g. the name shown in the bottom-left of participant boxes).
    - If a participant name is visible (e.g. "Anmol Patel"), extract and use their real name as the speaker.
-2. If host is speaking, use "${data.hostName || 'Host'}".
+2. If host is speaking, use "${data.hostName || "Host"}".
 3. If a remote attendee speaks and their name is not yet visible, label as "Remote Participant".
 4. Do NOT invent names from slide text or background presentations.
 
@@ -980,16 +1070,13 @@ If there is no speech or only background silence, return []. Strict JSON only.`;
       contents: [
         {
           role: "user",
-          parts: [
-            ...parts,
-            { text: "Transcribe the spoken audio segment and identify speakers." }
-          ]
-        }
+          parts: [...parts, { text: "Transcribe the spoken audio segment and identify speakers." }],
+        },
       ],
       config: {
         systemInstruction: systemPrompt,
         responseMimeType: "application/json",
-      }
+      },
     });
 
     const resultText = (response.text || "").trim();
@@ -1030,7 +1117,9 @@ If there is no speech or only background silence, return []. Strict JSON only.`;
           .select("name")
           .eq("meeting_id", data.meetingId);
 
-        const knownNames = new Set((existingParticipants || []).map((p: any) => (p.name || "").trim().toLowerCase()));
+        const knownNames = new Set(
+          (existingParticipants || []).map((p: any) => (p.name || "").trim().toLowerCase()),
+        );
 
         for (const s of validSegments) {
           const speakerClean = (s.speaker || "").trim();
@@ -1049,13 +1138,13 @@ If there is no speech or only background silence, return []. Strict JSON only.`;
 
       // We return the segments to the frontend.
       // The frontend will handle merging and batch saving to the DB to optimize writes.
-      return validSegments.map(s => ({
+      return validSegments.map((s) => ({
         meeting_id: data.meetingId,
         speaker: s.speaker,
         content: s.content,
         segment_index: data.segmentIndex,
         spoken_at: new Date().toISOString(),
-        status: "partial" // New low-latency status
+        status: "partial", // New low-latency status
       }));
     }
 
@@ -1154,7 +1243,8 @@ TASK:
     });
 
     const parsed = JSON.parse(response.text || "{}");
-    const cleanedList: Array<{ speaker: string; content: string }> = parsed.cleaned_transcripts || [];
+    const cleanedList: Array<{ speaker: string; content: string }> =
+      parsed.cleaned_transcripts || [];
 
     if (cleanedList.length > 0) {
       const toInsert = cleanedList.map((item, idx) => ({
@@ -1198,10 +1288,7 @@ export const deleteActionItemServer = createServerFn({ method: "POST" })
   .validator((data: { actionId: string }) => data)
   .handler(async ({ context, data }) => {
     const { supabase } = context;
-    const { error } = await supabase
-      .from("action_items")
-      .delete()
-      .eq("id", data.actionId);
+    const { error } = await supabase.from("action_items").delete().eq("id", data.actionId);
     if (error) {
       console.warn("deleteActionItemServer error:", error);
     }
@@ -1213,7 +1300,11 @@ export const fetchUserTodoTasks = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const { supabase, userId } = context;
 
-    const { data: prof } = await supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle();
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", userId)
+      .maybeSingle();
     const userFullName = (prof?.full_name || "").trim();
 
     const { data: allTasks } = await supabase
@@ -1233,14 +1324,16 @@ export const fetchUserTodoTasks = createServerFn({ method: "POST" })
   });
 export const createActionItemServer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((data: {
-    id?: string;
-    title: string;
-    assignee?: string | null;
-    meetingId: string;
-    deadline?: string | null;
-    status: string;
-  }) => data)
+  .validator(
+    (data: {
+      id?: string;
+      title: string;
+      assignee?: string | null;
+      meetingId: string;
+      deadline?: string | null;
+      status: string;
+    }) => data,
+  )
   .handler(async ({ context, data }) => {
     const { supabase } = context;
     const taskId = data.id || crypto.randomUUID();
@@ -1278,7 +1371,7 @@ export const createActionItemServer = createServerFn({ method: "POST" })
         meeting_id: data.meetingId,
         deadline: data.deadline || null,
         status: data.status || "pending",
-        created_at: new Date().toISOString()
-      }
+        created_at: new Date().toISOString(),
+      },
     };
   });

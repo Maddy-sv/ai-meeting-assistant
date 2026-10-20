@@ -8,11 +8,51 @@ export const Route = createFileRoute("/_authenticated/admin/users")({
 
 function AdminUsers() {
   const dummyUsers = [
-    { id: "1", name: "Sumeet M", email: "sumeetmadesm@gmail.com", role: "admin", meetings: 12, status: "Active", joined: "2026-08-20" },
-    { id: "2", name: "Sarah Connor", email: "sarah@example.com", role: "user", meetings: 4, status: "Active", joined: "2026-08-19" },
-    { id: "3", name: "John Doe", email: "john@example.com", role: "user", meetings: 1, status: "Inactive", joined: "2026-08-15" },
-    { id: "4", name: "Emily Chen", email: "emily@example.com", role: "user", meetings: 24, status: "Active", joined: "2026-07-22" },
-    { id: "5", name: "Michael Scott", email: "michael@example.com", role: "user", meetings: 89, status: "Active", joined: "2026-06-11" },
+    {
+      id: "1",
+      name: "Sumeet M",
+      email: "sumeetmadesm@gmail.com",
+      role: "admin",
+      meetings: 12,
+      status: "Active",
+      joined: "2026-08-20",
+    },
+    {
+      id: "2",
+      name: "Sarah Connor",
+      email: "sarah@example.com",
+      role: "user",
+      meetings: 4,
+      status: "Active",
+      joined: "2026-08-19",
+    },
+    {
+      id: "3",
+      name: "John Doe",
+      email: "john@example.com",
+      role: "user",
+      meetings: 1,
+      status: "Inactive",
+      joined: "2026-08-15",
+    },
+    {
+      id: "4",
+      name: "Emily Chen",
+      email: "emily@example.com",
+      role: "user",
+      meetings: 24,
+      status: "Active",
+      joined: "2026-07-22",
+    },
+    {
+      id: "5",
+      name: "Michael Scott",
+      email: "michael@example.com",
+      role: "user",
+      meetings: 89,
+      status: "Active",
+      joined: "2026-06-11",
+    },
   ];
 
   return (
@@ -22,7 +62,9 @@ function AdminUsers() {
           <Users className="h-8 w-8 text-red-500" />
           User Management
         </h1>
-        <p className="mt-2 text-sm text-muted-foreground">Manage accounts, roles, and platform access.</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Manage accounts, roles, and platform access.
+        </p>
       </header>
 
       <div className="glass rounded-2xl p-6 border-red-500/10">
@@ -30,7 +72,10 @@ function AdminUsers() {
           <h2 className="text-lg font-bold">Platform Users</h2>
           <div className="flex bg-black/20 rounded-lg px-3 py-1.5 items-center gap-2 border border-white/5">
             <Search className="h-4 w-4 text-muted-foreground" />
-            <input placeholder="Search users by name or email..." className="bg-transparent text-sm outline-none w-64" />
+            <input
+              placeholder="Search users by name or email..."
+              className="bg-transparent text-sm outline-none w-64"
+            />
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -46,24 +91,35 @@ function AdminUsers() {
               </tr>
             </thead>
             <tbody>
-              {dummyUsers.map(u => (
-                <tr key={u.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+              {dummyUsers.map((u) => (
+                <tr
+                  key={u.id}
+                  className="border-b border-white/5 hover:bg-white/5 transition-colors"
+                >
                   <td className="px-4 py-3 flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-full bg-white/10 grid place-items-center text-xs font-bold">{u.name.charAt(0)}</div>
+                    <div className="h-8 w-8 rounded-full bg-white/10 grid place-items-center text-xs font-bold">
+                      {u.name.charAt(0)}
+                    </div>
                     <div>
                       <div className="font-medium text-foreground">{u.name}</div>
                       <div className="text-xs text-muted-foreground">{u.email}</div>
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${u.role === 'admin' ? 'bg-red-500/20 text-red-500 flex items-center w-fit gap-1' : 'bg-white/10 w-fit'}`}>
-                      {u.role === 'admin' && <ShieldAlert className="h-3 w-3" />} {u.role}
+                    <span
+                      className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${u.role === "admin" ? "bg-red-500/20 text-red-500 flex items-center w-fit gap-1" : "bg-white/10 w-fit"}`}
+                    >
+                      {u.role === "admin" && <ShieldAlert className="h-3 w-3" />} {u.role}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-mono">{u.meetings}</td>
                   <td className="px-4 py-3">
-                    <span className={`flex items-center gap-2 ${u.status === 'Active' ? 'text-green-400' : 'text-muted-foreground'}`}>
-                      <div className={`h-2 w-2 rounded-full ${u.status === 'Active' ? 'bg-green-400' : 'bg-muted-foreground'}`} />
+                    <span
+                      className={`flex items-center gap-2 ${u.status === "Active" ? "text-green-400" : "text-muted-foreground"}`}
+                    >
+                      <div
+                        className={`h-2 w-2 rounded-full ${u.status === "Active" ? "bg-green-400" : "bg-muted-foreground"}`}
+                      />
                       {u.status}
                     </span>
                   </td>

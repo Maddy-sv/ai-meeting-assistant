@@ -14,12 +14,16 @@ function AdminAI() {
           <Zap className="h-8 w-8 text-red-500" />
           AI Processing Monitor
         </h1>
-        <p className="mt-2 text-sm text-muted-foreground">Detailed metrics on transcription and AI generation services.</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Detailed metrics on transcription and AI generation services.
+        </p>
       </header>
 
       <div className="grid md:grid-cols-3 gap-6">
         <div className="glass rounded-2xl p-6 border-blue-500/10">
-          <h2 className="text-lg font-bold mb-4 flex items-center gap-2"><Activity className="h-5 w-5 text-blue-400" /> Transcription Engine</h2>
+          <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+            <Activity className="h-5 w-5 text-blue-400" /> Transcription Engine
+          </h2>
           <div className="space-y-4">
             <StatRow label="Jobs Processed" value="1,248" />
             <StatRow label="Total Audio Hours" value="842h" />
@@ -27,9 +31,11 @@ function AdminAI() {
             <StatRow label="Success Rate" value="99.8%" color="text-green-400" />
           </div>
         </div>
-        
+
         <div className="glass rounded-2xl p-6 border-purple-500/10">
-          <h2 className="text-lg font-bold mb-4 flex items-center gap-2"><Zap className="h-5 w-5 text-purple-400" /> Summarization LLM</h2>
+          <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+            <Zap className="h-5 w-5 text-purple-400" /> Summarization LLM
+          </h2>
           <div className="space-y-4">
             <StatRow label="Summaries Generated" value="1,102" />
             <StatRow label="Tokens Processed" value="4.2M" />
@@ -58,16 +64,34 @@ function StatRow({ label, value, color = "text-foreground" }: any) {
       <span className="text-muted-foreground">{label}</span>
       <span className={`font-mono font-bold ${color}`}>{value}</span>
     </div>
-  )
+  );
 }
 
-function HealthRow({ label, status }: { label: string, status: 'operational' | 'warning' | 'error' }) {
+function HealthRow({
+  label,
+  status,
+}: {
+  label: string;
+  status: "operational" | "warning" | "error";
+}) {
   return (
     <div className="flex items-center justify-between p-3 rounded-lg bg-white/5">
       <span className="text-sm font-medium">{label}</span>
-      {status === 'operational' && <span className="flex items-center gap-1 text-[10px] uppercase text-green-500 font-bold"><CheckCircle2 className="h-3 w-3" /> OK</span>}
-      {status === 'warning' && <span className="flex items-center gap-1 text-[10px] uppercase text-amber-500 font-bold"><AlertTriangle className="h-3 w-3" /> Degraded</span>}
-      {status === 'error' && <span className="flex items-center gap-1 text-[10px] uppercase text-red-500 font-bold"><XCircle className="h-3 w-3" /> Offline</span>}
+      {status === "operational" && (
+        <span className="flex items-center gap-1 text-[10px] uppercase text-green-500 font-bold">
+          <CheckCircle2 className="h-3 w-3" /> OK
+        </span>
+      )}
+      {status === "warning" && (
+        <span className="flex items-center gap-1 text-[10px] uppercase text-amber-500 font-bold">
+          <AlertTriangle className="h-3 w-3" /> Degraded
+        </span>
+      )}
+      {status === "error" && (
+        <span className="flex items-center gap-1 text-[10px] uppercase text-red-500 font-bold">
+          <XCircle className="h-3 w-3" /> Offline
+        </span>
+      )}
     </div>
-  )
+  );
 }

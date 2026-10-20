@@ -2,28 +2,33 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
-import { updateActionItemStatus, deleteActionItemServer, fetchUserTodoTasks, createActionItemServer } from "@/lib/ai.functions";
-import { 
-  STABLE_TASK_IDS, 
-  getStableTaskId, 
-  safeFormatDeadline, 
-  resolveDeadlineToISODate, 
-  resolveDeadlineToDate 
+import {
+  updateActionItemStatus,
+  deleteActionItemServer,
+  fetchUserTodoTasks,
+  createActionItemServer,
+} from "@/lib/ai.functions";
+import {
+  STABLE_TASK_IDS,
+  getStableTaskId,
+  safeFormatDeadline,
+  resolveDeadlineToISODate,
+  resolveDeadlineToDate,
 } from "@/lib/continuous-memory";
-import { 
-  CheckCircle2, 
-  Clock, 
-  AlertCircle, 
-  Plus, 
-  Search, 
-  Video, 
-  User, 
-  Calendar, 
-  Trash2, 
+import {
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  Plus,
+  Search,
+  Video,
+  User,
+  Calendar,
+  Trash2,
   ArrowRight,
   ArrowLeft,
-  Check, 
-  MoreVertical, 
+  Check,
+  MoreVertical,
   ExternalLink,
   Sparkles,
   FileText,
@@ -31,18 +36,31 @@ import {
   X,
   Layers,
   ArrowUpRight,
-  Mail
+  Mail,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
@@ -106,7 +124,7 @@ export function deduplicateAndReconcileTasks(
   rawTasks: ActionItem[],
   statusMap: Record<string, string>,
   mMap: Map<string, MeetingInfo>,
-  sMap: Map<string, MeetingSummary>
+  sMap: Map<string, MeetingSummary>,
 ): {
   deduplicated: ActionItem[];
   duplicateIdsToDelete: string[];
@@ -123,7 +141,12 @@ export function deduplicateAndReconcileTasks(
     const mTitle = (m?.title || "").toLowerCase();
     const sum = raw.meeting_id ? sMap.get(raw.meeting_id) : null;
     const sumText = (sum?.executive_summary || "").toLowerCase();
-    const isM2 = mTitle.includes("new2") || mTitle.includes("meeting 2") || mTitle.includes("new 2") || mTitle === "2" || sumText.includes("shreyash");
+    const isM2 =
+      mTitle.includes("new2") ||
+      mTitle.includes("meeting 2") ||
+      mTitle.includes("new 2") ||
+      mTitle === "2" ||
+      sumText.includes("shreyash");
 
     let assignee = raw.assignee;
     if (isM2 || sumText.includes("shreyash")) {
@@ -149,12 +172,19 @@ export function deduplicateAndReconcileTasks(
 
     // Determine status
     let status = raw.status || "pending";
-    if (isM2 && (title.toLowerCase().includes("dashboard") || title.toLowerCase().includes("ui improvement"))) {
+    if (
+      isM2 &&
+      (title.toLowerCase().includes("dashboard") || title.toLowerCase().includes("ui improvement"))
+    ) {
       status = "done";
     }
 
     // Priority check with saved statusMap
-    const savedStatus = statusMap[taskKey] || statusMap[stableId] || statusMap[raw.id] || statusMap[title.toLowerCase().trim()];
+    const savedStatus =
+      statusMap[taskKey] ||
+      statusMap[stableId] ||
+      statusMap[raw.id] ||
+      statusMap[title.toLowerCase().trim()];
     if (savedStatus) {
       status = savedStatus;
     }
@@ -165,7 +195,7 @@ export function deduplicateAndReconcileTasks(
       title,
       assignee,
       deadline,
-      status
+      status,
     };
 
     if (!taskGroupMap.has(taskKey)) {
@@ -189,7 +219,11 @@ export function deduplicateAndReconcileTasks(
       }
 
       // Better assignee: prefer actual name over generic placeholder
-      if ((!existing.assignee || existing.assignee.includes("Remote")) && assignee && !assignee.includes("Remote")) {
+      if (
+        (!existing.assignee || existing.assignee.includes("Remote")) &&
+        assignee &&
+        !assignee.includes("Remote")
+      ) {
         existing.assignee = assignee;
       }
 
@@ -250,7 +284,7 @@ function TodoPage() {
           if (Array.isArray(parsed) && parsed.length > 0) {
             const mapped = parsed.map((t: ActionItem) => ({
               ...t,
-              status: statusMap[t.id] || statusMap[t.title.toLowerCase().trim()] || t.status
+              status: statusMap[t.id] || statusMap[t.title.toLowerCase().trim()] || t.status,
             }));
             setTasks(mapped);
           }
@@ -261,23 +295,38 @@ function TodoPage() {
 
       const { data: u } = await supabase.auth.getUser();
       if (!u.user) return;
-      
+
       setCurrentUserId(u.user.id);
 
-      const { data: prof } = await supabase.from("profiles").select("full_name").eq("id", u.user.id).maybeSingle();
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", u.user.id)
+        .maybeSingle();
       const meta = u.user.user_metadata;
-      const fullName = (prof?.full_name || meta?.full_name || meta?.name || u.user.email?.split("@")[0] || "Sumeet Made").trim();
+      const fullName = (
+        prof?.full_name ||
+        meta?.full_name ||
+        meta?.name ||
+        u.user.email?.split("@")[0] ||
+        "Sumeet Made"
+      ).trim();
       setUserFullName(fullName);
 
       // Check role
-      const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", u.user.id);
+      const { data: roles } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", u.user.id);
       const admin = (roles ?? []).some((r: any) => r.role === "admin");
       setIsAdmin(admin);
 
       // Fetch meetings & summaries
       const [{ data: mData }, { data: sData }] = await Promise.all([
         supabase.from("meetings").select("*").order("created_at", { ascending: false }),
-        supabase.from("ai_summaries").select("meeting_id, executive_summary, key_points, follow_ups")
+        supabase
+          .from("ai_summaries")
+          .select("meeting_id, executive_summary, key_points, follow_ups"),
       ]);
 
       const mList = (mData as MeetingInfo[]) ?? [];
@@ -285,13 +334,13 @@ function TodoPage() {
       if (mList.length > 0 && newMeetingId === "none") {
         setNewMeetingId(mList[0].id);
       }
-      
+
       const mMap = new Map<string, MeetingInfo>();
-      mList.forEach(m => mMap.set(m.id, m));
+      mList.forEach((m) => mMap.set(m.id, m));
       setMeetingsMap(mMap);
 
       const sMap = new Map<string, MeetingSummary>();
-      ((sData as MeetingSummary[]) ?? []).forEach(s => sMap.set(s.meeting_id, s));
+      ((sData as MeetingSummary[]) ?? []).forEach((s) => sMap.set(s.meeting_id, s));
       setSummariesMap(sMap);
 
       // Normalizer helper function for cross-meeting consistency
@@ -300,8 +349,18 @@ function TodoPage() {
         const mTitle = (m?.title || "").toLowerCase();
         const sum = t.meeting_id ? sMap.get(t.meeting_id) : null;
         const sumText = (sum?.executive_summary || "").toLowerCase();
-        const isM2 = mTitle.includes("new2") || mTitle.includes("meeting 2") || mTitle.includes("new 2") || mTitle === "2" || sumText.includes("shreyash");
-        const isM1 = (mTitle.includes("new1") || mTitle.includes("meeting 1") || mTitle.includes("new 1") || mTitle === "1") && !isM2;
+        const isM2 =
+          mTitle.includes("new2") ||
+          mTitle.includes("meeting 2") ||
+          mTitle.includes("new 2") ||
+          mTitle === "2" ||
+          sumText.includes("shreyash");
+        const isM1 =
+          (mTitle.includes("new1") ||
+            mTitle.includes("meeting 1") ||
+            mTitle.includes("new 1") ||
+            mTitle === "1") &&
+          !isM2;
 
         let updated = { ...t };
         if (isM2) {
@@ -317,23 +376,37 @@ function TodoPage() {
             updated.status = "done";
           }
           // Issue 2: UI improvements reported complete in Meeting 2
-          if (updated.title.toLowerCase().includes("ui improvement") || updated.title.toLowerCase().includes("ui improvements")) {
+          if (
+            updated.title.toLowerCase().includes("ui improvement") ||
+            updated.title.toLowerCase().includes("ui improvements")
+          ) {
             updated.status = "done";
             updated.assignee = "Shreyash";
           }
         } else if (isM1) {
           // Issue 4: Deadline inconsistency in Meeting 1 -> Tuesday evening
-          if (updated.title.toLowerCase().includes("ui improvement") || updated.title.toLowerCase().includes("ui improvements")) {
+          if (
+            updated.title.toLowerCase().includes("ui improvement") ||
+            updated.title.toLowerCase().includes("ui improvements")
+          ) {
             updated.deadline = "Tuesday evening";
           }
         }
-        const hasLaterCompletion = Array.from(mMap.values()).some(otherM => {
+        const hasLaterCompletion = Array.from(mMap.values()).some((otherM) => {
           const oTitle = (otherM.title || "").toLowerCase();
           const oSum = (sMap.get(otherM.id)?.executive_summary || "").toLowerCase();
-          return oTitle.includes("new2") || oTitle.includes("meeting 2") || oTitle.includes("new 2") || oSum.includes("shreyash");
+          return (
+            oTitle.includes("new2") ||
+            oTitle.includes("meeting 2") ||
+            oTitle.includes("new 2") ||
+            oSum.includes("shreyash")
+          );
         });
 
-        const isCompletedAcrossMeetings = (isM2 || hasLaterCompletion) && (updated.title.toLowerCase().includes("dashboard") || updated.title.toLowerCase().includes("ui improvement"));
+        const isCompletedAcrossMeetings =
+          (isM2 || hasLaterCompletion) &&
+          (updated.title.toLowerCase().includes("dashboard") ||
+            updated.title.toLowerCase().includes("ui improvement"));
         if (isCompletedAcrossMeetings) {
           saveStatusToStorage(updated.id, updated.title, "done");
         }
@@ -342,7 +415,9 @@ function TodoPage() {
           ...updated,
           status: isCompletedAcrossMeetings
             ? "done"
-            : (statusMap[updated.id] || statusMap[updated.title.toLowerCase().trim()] || updated.status)
+            : statusMap[updated.id] ||
+              statusMap[updated.title.toLowerCase().trim()] ||
+              updated.status,
         };
       };
 
@@ -375,7 +450,7 @@ function TodoPage() {
 
       for (const m of mList) {
         // Check if this meeting already has any tasks in combinedTasks
-        const existingForMeeting = combinedTasks.filter(t => t.meeting_id === m.id);
+        const existingForMeeting = combinedTasks.filter((t) => t.meeting_id === m.id);
         if (existingForMeeting.length > 0) continue;
 
         const sum = sMap.get(m.id);
@@ -390,14 +465,27 @@ function TodoPage() {
         const friDate = resolveDeadlineToISODate("Friday", meetingDate) || "2026-10-23";
         const tueDate = resolveDeadlineToISODate("Tuesday evening", meetingDate) || "2026-10-20";
 
-        const isM2 = mTitle.includes("new2") || mTitle.includes("meeting 2") || mTitle.includes("new 2") || mTitle === "2" || combined.toLowerCase().includes("shreyash");
-        const isM1 = (mTitle.includes("new1") || mTitle.includes("meeting 1") || mTitle.includes("new 1") || mTitle === "1") && !isM2;
+        const isM2 =
+          mTitle.includes("new2") ||
+          mTitle.includes("meeting 2") ||
+          mTitle.includes("new 2") ||
+          mTitle === "2" ||
+          combined.toLowerCase().includes("shreyash");
+        const isM1 =
+          (mTitle.includes("new1") ||
+            mTitle.includes("meeting 1") ||
+            mTitle.includes("new 1") ||
+            mTitle === "1") &&
+          !isM2;
         const remotePartner = isM2 ? "Shreyash" : "Remote Participant";
 
         const meetingTasks: ActionItem[] = [];
 
         // 1. College Event
-        if (combined.toLowerCase().includes("college event") || combined.toLowerCase().includes("registration")) {
+        if (
+          combined.toLowerCase().includes("college event") ||
+          combined.toLowerCase().includes("registration")
+        ) {
           meetingTasks.push(
             {
               id: crypto.randomUUID(),
@@ -406,7 +494,7 @@ function TodoPage() {
               assignee: hostName,
               deadline: friDate,
               status: statusMap["handle registration and prepare participant list"] || "pending",
-              created_at: new Date().toISOString()
+              created_at: new Date().toISOString(),
             },
             {
               id: crypto.randomUUID(),
@@ -415,8 +503,8 @@ function TodoPage() {
               assignee: "Remote Participant",
               deadline: null,
               status: statusMap["take care of decoration for the college event"] || "pending",
-              created_at: new Date().toISOString()
-            }
+              created_at: new Date().toISOString(),
+            },
           );
         }
         // 2. Meeting 2 (Sequential progress & completions)
@@ -429,7 +517,7 @@ function TodoPage() {
               assignee: hostName,
               deadline: wedDate,
               status: "done",
-              created_at: new Date(Date.now() - 300000).toISOString()
+              created_at: new Date(Date.now() - 300000).toISOString(),
             },
             {
               id: STABLE_TASK_IDS.share,
@@ -438,7 +526,7 @@ function TodoPage() {
               assignee: hostName,
               deadline: wedDate,
               status: "done",
-              created_at: new Date(Date.now() - 240000).toISOString()
+              created_at: new Date(Date.now() - 240000).toISOString(),
             },
             {
               id: STABLE_TASK_IDS.ui_testing,
@@ -447,7 +535,7 @@ function TodoPage() {
               assignee: "Shreyash",
               deadline: friDate,
               status: "done",
-              created_at: new Date(Date.now() - 180000).toISOString()
+              created_at: new Date(Date.now() - 180000).toISOString(),
             },
             {
               id: STABLE_TASK_IDS.joint_review,
@@ -456,12 +544,16 @@ function TodoPage() {
               assignee: `Shreyash & ${hostName}`,
               deadline: friDate,
               status: statusMap[STABLE_TASK_IDS.joint_review] || "pending",
-              created_at: new Date(Date.now() - 120000).toISOString()
-            }
+              created_at: new Date(Date.now() - 120000).toISOString(),
+            },
           );
         }
         // 3. Meeting 1 / Dashboard & UI Improvement discussions
-        else if (isM1 || combined.toLowerCase().includes("dashboard") || combined.toLowerCase().includes("frontend")) {
+        else if (
+          isM1 ||
+          combined.toLowerCase().includes("dashboard") ||
+          combined.toLowerCase().includes("frontend")
+        ) {
           meetingTasks.push(
             {
               id: STABLE_TASK_IDS.dashboard,
@@ -470,7 +562,7 @@ function TodoPage() {
               assignee: hostName,
               deadline: wedDate,
               status: statusMap[STABLE_TASK_IDS.dashboard] || "pending",
-              created_at: new Date(Date.now() - 300000).toISOString()
+              created_at: new Date(Date.now() - 300000).toISOString(),
             },
             {
               id: STABLE_TASK_IDS.share,
@@ -479,7 +571,7 @@ function TodoPage() {
               assignee: hostName,
               deadline: wedDate,
               status: statusMap[STABLE_TASK_IDS.share] || "done",
-              created_at: new Date(Date.now() - 240000).toISOString()
+              created_at: new Date(Date.now() - 240000).toISOString(),
             },
             {
               id: STABLE_TASK_IDS.ui_testing,
@@ -488,7 +580,7 @@ function TodoPage() {
               assignee: remotePartner,
               deadline: isM1 ? tueDate : friDate,
               status: statusMap[STABLE_TASK_IDS.ui_testing] || "pending",
-              created_at: new Date(Date.now() - 180000).toISOString()
+              created_at: new Date(Date.now() - 180000).toISOString(),
             },
             {
               id: STABLE_TASK_IDS.joint_review,
@@ -497,12 +589,16 @@ function TodoPage() {
               assignee: `${remotePartner} & ${hostName}`,
               deadline: friDate,
               status: statusMap[STABLE_TASK_IDS.joint_review] || "pending",
-              created_at: new Date(Date.now() - 120000).toISOString()
-            }
+              created_at: new Date(Date.now() - 120000).toISOString(),
+            },
           );
         }
         // 4. Auth Refactor Planning
-        else if (combined.toLowerCase().includes("auth") || combined.toLowerCase().includes("sso") || combined.toLowerCase().includes("migration")) {
+        else if (
+          combined.toLowerCase().includes("auth") ||
+          combined.toLowerCase().includes("sso") ||
+          combined.toLowerCase().includes("migration")
+        ) {
           meetingTasks.push(
             {
               id: crypto.randomUUID(),
@@ -511,7 +607,7 @@ function TodoPage() {
               assignee: "Marcus Reed",
               deadline: wedDate,
               status: "pending",
-              created_at: new Date().toISOString()
+              created_at: new Date().toISOString(),
             },
             {
               id: crypto.randomUUID(),
@@ -520,7 +616,7 @@ function TodoPage() {
               assignee: "Priya Shah",
               deadline: friDate,
               status: "pending",
-              created_at: new Date().toISOString()
+              created_at: new Date().toISOString(),
             },
             {
               id: crypto.randomUUID(),
@@ -529,12 +625,15 @@ function TodoPage() {
               assignee: hostName,
               deadline: friDate,
               status: "done",
-              created_at: new Date().toISOString()
-            }
+              created_at: new Date().toISOString(),
+            },
           );
         }
         // 5. Design Review
-        else if (combined.toLowerCase().includes("design") || combined.toLowerCase().includes("landing")) {
+        else if (
+          combined.toLowerCase().includes("design") ||
+          combined.toLowerCase().includes("landing")
+        ) {
           meetingTasks.push(
             {
               id: crypto.randomUUID(),
@@ -543,7 +642,7 @@ function TodoPage() {
               assignee: hostName,
               deadline: friDate,
               status: "pending",
-              created_at: new Date().toISOString()
+              created_at: new Date().toISOString(),
             },
             {
               id: crypto.randomUUID(),
@@ -552,8 +651,8 @@ function TodoPage() {
               assignee: "Marcus Reed",
               deadline: wedDate,
               status: "pending",
-              created_at: new Date().toISOString()
-            }
+              created_at: new Date().toISOString(),
+            },
           );
         }
         // 6. Follow-ups from AI Summary
@@ -570,22 +669,38 @@ function TodoPage() {
               assignee: hostName,
               deadline: dLine,
               status: "pending",
-              created_at: new Date().toISOString()
+              created_at: new Date().toISOString(),
             });
           }
         }
         // 7. General meetings: actionable sentences from summary/key points
         else if (sumText || keyPoints.length > 0) {
-          const sentences = combined.split(/\. |\.\n/).map(s => s.trim()).filter(Boolean);
+          const sentences = combined
+            .split(/\. |\.\n/)
+            .map((s) => s.trim())
+            .filter(Boolean);
           for (const s of sentences) {
             const lower = s.toLowerCase();
-            if (lower.includes("will ") || lower.includes("prepare") || lower.includes("handle") || lower.includes("review") || lower.includes("owns") || lower.includes("complete") || lower.includes("ship") || lower.includes("coordinate")) {
+            if (
+              lower.includes("will ") ||
+              lower.includes("prepare") ||
+              lower.includes("handle") ||
+              lower.includes("review") ||
+              lower.includes("owns") ||
+              lower.includes("complete") ||
+              lower.includes("ship") ||
+              lower.includes("coordinate")
+            ) {
               let clean = s;
               let assignee = hostName;
               if (clean.toLowerCase().startsWith("sumeet agreed to ")) clean = clean.slice(17);
-              else if (clean.toLowerCase().includes("agreed to ")) clean = clean.slice(clean.toLowerCase().indexOf("agreed to ") + 10);
+              else if (clean.toLowerCase().includes("agreed to "))
+                clean = clean.slice(clean.toLowerCase().indexOf("agreed to ") + 10);
               clean = clean.charAt(0).toUpperCase() + clean.slice(1);
-              if (clean.length > 5 && !meetingTasks.some(mt => mt.title.toLowerCase() === clean.toLowerCase())) {
+              if (
+                clean.length > 5 &&
+                !meetingTasks.some((mt) => mt.title.toLowerCase() === clean.toLowerCase())
+              ) {
                 let dLine = friDate;
                 if (lower.includes("wednesday")) dLine = wedDate;
                 else if (lower.includes("tuesday")) dLine = tueDate;
@@ -596,7 +711,7 @@ function TodoPage() {
                   assignee,
                   deadline: dLine,
                   status: "pending",
-                  created_at: new Date().toISOString()
+                  created_at: new Date().toISOString(),
                 });
               }
             }
@@ -611,14 +726,16 @@ function TodoPage() {
 
       if (newTasksToInsert.length > 0) {
         try {
-          await supabase.from("action_items").upsert(newTasksToInsert.map(a => ({
-            id: a.id,
-            meeting_id: a.meeting_id,
-            title: a.title,
-            assignee: a.assignee,
-            deadline: a.deadline,
-            status: a.status
-          })));
+          await supabase.from("action_items").upsert(
+            newTasksToInsert.map((a) => ({
+              id: a.id,
+              meeting_id: a.meeting_id,
+              title: a.title,
+              assignee: a.assignee,
+              deadline: a.deadline,
+              status: a.status,
+            })),
+          );
         } catch (e) {
           console.warn("Auto-extracted tasks insert note:", e);
         }
@@ -630,12 +747,16 @@ function TodoPage() {
         combinedTasks,
         statusMap,
         mMap,
-        sMap
+        sMap,
       );
 
       // Clean up duplicate IDs from Supabase table in background so DB remains clean
       if (duplicateIdsToDelete.length > 0) {
-        supabase.from("action_items").delete().in("id", duplicateIdsToDelete).then(() => {});
+        supabase
+          .from("action_items")
+          .delete()
+          .in("id", duplicateIdsToDelete)
+          .then(() => {});
       }
 
       setTasks(deduplicated);
@@ -675,10 +796,12 @@ function TodoPage() {
     return deduplicatedList.filter((t) => {
       // Role / Ownership filter
       if (adminViewMode === "mine") {
-        const isHostedByMe = t.meeting_id ? meetingsMap.get(t.meeting_id)?.host_id === currentUserId : false;
+        const isHostedByMe = t.meeting_id
+          ? meetingsMap.get(t.meeting_id)?.host_id === currentUserId
+          : false;
         const assignee = (t.assignee || "").trim().toLowerCase();
-        
-        const isAssignedToMe = 
+
+        const isAssignedToMe =
           !assignee ||
           ["you", "host", "me", "i", "myself", "current user"].includes(assignee) ||
           (firstName && assignee.includes(firstName)) ||
@@ -696,7 +819,9 @@ function TodoPage() {
         const query = searchQuery.toLowerCase();
         const matchesTitle = t.title.toLowerCase().includes(query);
         const matchesAssignee = (t.assignee || "").toLowerCase().includes(query);
-        const meetingTitle = t.meeting_id ? meetingsMap.get(t.meeting_id)?.title.toLowerCase() || "" : "";
+        const meetingTitle = t.meeting_id
+          ? meetingsMap.get(t.meeting_id)?.title.toLowerCase() || ""
+          : "";
         const matchesMeeting = meetingTitle.includes(query);
 
         if (!matchesTitle && !matchesAssignee && !matchesMeeting) return false;
@@ -746,17 +871,25 @@ function TodoPage() {
       bc = new BroadcastChannel("meeting_tasks_sync");
       bc.onmessage = (event) => {
         if (event.data?.type === "TASK_STATUS_UPDATED") {
-          setTasks(prev => prev.map(t => {
-            const isMatch = t.id === event.data.id || (event.data.title && getStableTaskId(t.title, t.id).key === getStableTaskId(event.data.title, event.data.id).key);
-            return isMatch ? { ...t, status: event.data.status } : t;
-          }));
+          setTasks((prev) =>
+            prev.map((t) => {
+              const isMatch =
+                t.id === event.data.id ||
+                (event.data.title &&
+                  getStableTaskId(t.title, t.id).key ===
+                    getStableTaskId(event.data.title, event.data.id).key);
+              return isMatch ? { ...t, status: event.data.status } : t;
+            }),
+          );
         } else if (event.data?.type === "TASK_DELETED") {
-          setTasks(prev => prev.filter(t => t.id !== event.data.id));
+          setTasks((prev) => prev.filter((t) => t.id !== event.data.id));
         } else if (event.data?.type === "TASK_CREATED" && event.data.task) {
-          setTasks(prev => {
+          setTasks((prev) => {
             const { key: newKey } = getStableTaskId(event.data.task.title, event.data.task.id);
-            if (prev.some(t => getStableTaskId(t.title, t.id).key === newKey)) {
-              return prev.map(t => getStableTaskId(t.title, t.id).key === newKey ? { ...t, ...event.data.task } : t);
+            if (prev.some((t) => getStableTaskId(t.title, t.id).key === newKey)) {
+              return prev.map((t) =>
+                getStableTaskId(t.title, t.id).key === newKey ? { ...t, ...event.data.task } : t,
+              );
             }
             return [event.data.task, ...prev];
           });
@@ -772,22 +905,29 @@ function TodoPage() {
         (payload: any) => {
           if (payload.eventType === "UPDATE") {
             const updated = payload.new;
-            setTasks(prev => prev.map(t => {
-              const isMatch = t.id === updated.id || getStableTaskId(t.title, t.id).key === getStableTaskId(updated.title, updated.id).key;
-              return isMatch ? { ...t, ...updated } : t;
-            }));
+            setTasks((prev) =>
+              prev.map((t) => {
+                const isMatch =
+                  t.id === updated.id ||
+                  getStableTaskId(t.title, t.id).key ===
+                    getStableTaskId(updated.title, updated.id).key;
+                return isMatch ? { ...t, ...updated } : t;
+              }),
+            );
           } else if (payload.eventType === "INSERT") {
-            setTasks(prev => {
+            setTasks((prev) => {
               const { key: newKey } = getStableTaskId(payload.new.title, payload.new.id);
-              if (prev.some(t => getStableTaskId(t.title, t.id).key === newKey)) {
-                return prev.map(t => getStableTaskId(t.title, t.id).key === newKey ? { ...t, ...payload.new } : t);
+              if (prev.some((t) => getStableTaskId(t.title, t.id).key === newKey)) {
+                return prev.map((t) =>
+                  getStableTaskId(t.title, t.id).key === newKey ? { ...t, ...payload.new } : t,
+                );
               }
               return [payload.new, ...prev];
             });
           } else if (payload.eventType === "DELETE") {
-            setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+            setTasks((prev) => prev.filter((t) => t.id !== payload.old.id));
           }
-        }
+        },
       )
       .subscribe();
 
@@ -798,16 +938,17 @@ function TodoPage() {
   }, []);
 
   async function updateTaskStatus(taskId: string, newStatus: string) {
-    const targetTask = tasks.find(t => t.id === taskId);
+    const targetTask = tasks.find((t) => t.id === taskId);
     const taskKey = targetTask ? getStableTaskId(targetTask.title, targetTask.id).key : null;
     const stableId = targetTask ? getStableTaskId(targetTask.title, targetTask.id).id : taskId;
 
     saveStatusToStorage(taskId, targetTask?.title || "", newStatus);
     if (taskKey) saveStatusToStorage(stableId, taskKey, newStatus);
 
-    setTasks(prev => {
-      const updated = prev.map(t => {
-        const matches = t.id === taskId || (taskKey && getStableTaskId(t.title, t.id).key === taskKey);
+    setTasks((prev) => {
+      const updated = prev.map((t) => {
+        const matches =
+          t.id === taskId || (taskKey && getStableTaskId(t.title, t.id).key === taskKey);
         return matches ? { ...t, status: newStatus } : t;
       });
       try {
@@ -816,15 +957,24 @@ function TodoPage() {
       return updated;
     });
 
-    if (selectedTask && (selectedTask.id === taskId || (taskKey && getStableTaskId(selectedTask.title, selectedTask.id).key === taskKey))) {
-      setSelectedTask(prev => prev ? { ...prev, status: newStatus } : null);
+    if (
+      selectedTask &&
+      (selectedTask.id === taskId ||
+        (taskKey && getStableTaskId(selectedTask.title, selectedTask.id).key === taskKey))
+    ) {
+      setSelectedTask((prev) => (prev ? { ...prev, status: newStatus } : null));
     }
 
     // Broadcast instantly to all open meeting views and other browser tabs
     try {
       if (typeof window !== "undefined" && "BroadcastChannel" in window) {
         const bc = new BroadcastChannel("meeting_tasks_sync");
-        bc.postMessage({ type: "TASK_STATUS_UPDATED", id: taskId, title: targetTask?.title, status: newStatus });
+        bc.postMessage({
+          type: "TASK_STATUS_UPDATED",
+          id: taskId,
+          title: targetTask?.title,
+          status: newStatus,
+        });
         bc.close();
       }
     } catch (e) {
@@ -838,26 +988,34 @@ function TodoPage() {
         await supabase.from("action_items").update({ status: newStatus }).eq("id", taskId);
       }
       if (targetTask?.title) {
-        supabase.from("action_items").update({ status: newStatus }).ilike("title", targetTask.title).then(() => {});
+        supabase
+          .from("action_items")
+          .update({ status: newStatus })
+          .ilike("title", targetTask.title)
+          .then(() => {});
       }
-      const statusLabel = newStatus === "done" ? "Completed" : newStatus === "in_progress" ? "In Progress" : "To Do";
+      const statusLabel =
+        newStatus === "done" ? "Completed" : newStatus === "in_progress" ? "In Progress" : "To Do";
       toast.success(`Task moved to ${statusLabel}`);
     } catch (err: any) {
       console.warn("Update status note:", err);
-      const statusLabel = newStatus === "done" ? "Completed" : newStatus === "in_progress" ? "In Progress" : "To Do";
+      const statusLabel =
+        newStatus === "done" ? "Completed" : newStatus === "in_progress" ? "In Progress" : "To Do";
       toast.success(`Task moved to ${statusLabel}`);
     }
   }
 
   async function deleteTask(taskId: string) {
-    const targetTask = tasks.find(t => t.id === taskId);
+    const targetTask = tasks.find((t) => t.id === taskId);
     const taskKey = targetTask ? getStableTaskId(targetTask.title, targetTask.id).key : null;
 
-    setTasks(prev => prev.filter(t => {
-      if (t.id === taskId) return false;
-      if (taskKey && getStableTaskId(t.title, t.id).key === taskKey) return false;
-      return true;
-    }));
+    setTasks((prev) =>
+      prev.filter((t) => {
+        if (t.id === taskId) return false;
+        if (taskKey && getStableTaskId(t.title, t.id).key === taskKey) return false;
+        return true;
+      }),
+    );
     if (selectedTask?.id === taskId) {
       setSelectedTask(null);
     }
@@ -879,7 +1037,11 @@ function TodoPage() {
         await supabase.from("action_items").delete().eq("id", taskId);
       }
       if (targetTask?.title) {
-        supabase.from("action_items").delete().ilike("title", targetTask.title).then(() => {});
+        supabase
+          .from("action_items")
+          .delete()
+          .ilike("title", targetTask.title)
+          .then(() => {});
       }
       toast.success("Task deleted");
     } catch (err: any) {
@@ -897,9 +1059,12 @@ function TodoPage() {
 
     setCreating(true);
     try {
-      const meetingIdToUse = (newMeetingId && newMeetingId !== "none") 
-        ? newMeetingId 
-        : (allMeetings.length > 0 ? allMeetings[0].id : null);
+      const meetingIdToUse =
+        newMeetingId && newMeetingId !== "none"
+          ? newMeetingId
+          : allMeetings.length > 0
+            ? allMeetings[0].id
+            : null;
 
       if (!meetingIdToUse) {
         toast.error("Please create a meeting before adding an action item.");
@@ -923,7 +1088,7 @@ function TodoPage() {
       saveStatusToStorage(taskId, newTaskObj.title, newStatus);
 
       // 2. Immediately update state
-      setTasks(prev => [newTaskObj, ...prev]);
+      setTasks((prev) => [newTaskObj, ...prev]);
 
       // 3. Immediately persist to localStorage cache
       try {
@@ -960,8 +1125,8 @@ function TodoPage() {
           meetingId: meetingIdToUse,
           deadline: newTaskObj.deadline,
           status: newTaskObj.status,
-        }
-      }).catch(err => {
+        },
+      }).catch((err) => {
         console.warn("createActionServerFn background note:", err);
       });
     } catch (err: any) {
@@ -974,17 +1139,23 @@ function TodoPage() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <p className="text-sm text-muted-foreground animate-pulse">Loading all action items and tasks...</p>
+        <p className="text-sm text-muted-foreground animate-pulse">
+          Loading all action items and tasks...
+        </p>
       </div>
     );
   }
 
-  const todoTasks = visibleTasks.filter(t => t.status === "pending");
-  const inProgressTasks = visibleTasks.filter(t => t.status === "in_progress");
-  const doneTasks = visibleTasks.filter(t => t.status === "done");
+  const todoTasks = visibleTasks.filter((t) => t.status === "pending");
+  const inProgressTasks = visibleTasks.filter((t) => t.status === "in_progress");
+  const doneTasks = visibleTasks.filter((t) => t.status === "done");
 
-  const selectedMeeting = selectedTask?.meeting_id ? meetingsMap.get(selectedTask.meeting_id) : null;
-  const selectedSummary = selectedTask?.meeting_id ? summariesMap.get(selectedTask.meeting_id) : null;
+  const selectedMeeting = selectedTask?.meeting_id
+    ? meetingsMap.get(selectedTask.meeting_id)
+    : null;
+  const selectedSummary = selectedTask?.meeting_id
+    ? summariesMap.get(selectedTask.meeting_id)
+    : null;
 
   return (
     <div className="space-y-6 flex flex-col h-full animate-in fade-in-50 duration-500">
@@ -993,7 +1164,8 @@ function TodoPage() {
         <div>
           <h1 className="text-3xl font-black tracking-tight">To-Do List & Action Items</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            All tasks extracted from your meetings and deliverables assigned to you appear here automatically.
+            All tasks extracted from your meetings and deliverables assigned to you appear here
+            automatically.
           </p>
         </div>
 
@@ -1002,7 +1174,9 @@ function TodoPage() {
             <button
               onClick={() => setAdminViewMode("mine")}
               className={`px-3 py-1.5 rounded-lg font-medium transition ${
-                adminViewMode === "mine" ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-white"
+                adminViewMode === "mine"
+                  ? "bg-primary text-primary-foreground shadow"
+                  : "text-muted-foreground hover:text-white"
               }`}
             >
               My Tasks
@@ -1010,7 +1184,9 @@ function TodoPage() {
             <button
               onClick={() => setAdminViewMode("all")}
               className={`px-3 py-1.5 rounded-lg font-medium transition ${
-                adminViewMode === "all" ? "bg-primary text-primary-foreground shadow" : "text-muted-foreground hover:text-white"
+                adminViewMode === "all"
+                  ? "bg-primary text-primary-foreground shadow"
+                  : "text-muted-foreground hover:text-white"
               }`}
             >
               All Workspace Tasks ({tasks.length})
@@ -1035,7 +1211,7 @@ function TodoPage() {
                     id="task-title"
                     placeholder="e.g. Complete presentation slides"
                     value={newTitle}
-                    onChange={e => setNewTitle(e.target.value)}
+                    onChange={(e) => setNewTitle(e.target.value)}
                     required
                     className="bg-white/5 border-white/10"
                   />
@@ -1047,7 +1223,7 @@ function TodoPage() {
                     id="task-assignee"
                     placeholder={userFullName || "Your Name"}
                     value={newAssignee}
-                    onChange={e => setNewAssignee(e.target.value)}
+                    onChange={(e) => setNewAssignee(e.target.value)}
                     className="bg-white/5 border-white/10"
                   />
                 </div>
@@ -1059,7 +1235,7 @@ function TodoPage() {
                       <SelectValue placeholder="Select a meeting" />
                     </SelectTrigger>
                     <SelectContent>
-                      {allMeetings.map(m => (
+                      {allMeetings.map((m) => (
                         <SelectItem key={m.id} value={m.id}>
                           {m.title}
                         </SelectItem>
@@ -1075,7 +1251,7 @@ function TodoPage() {
                       id="task-deadline"
                       type="date"
                       value={newDeadline}
-                      onChange={e => setNewDeadline(e.target.value)}
+                      onChange={(e) => setNewDeadline(e.target.value)}
                       className="bg-white/5 border-white/10"
                     />
                   </div>
@@ -1116,7 +1292,7 @@ function TodoPage() {
           <Input
             placeholder="Search tasks, meetings, or assignees..."
             value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+            onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9 bg-white/5 border-white/5 h-9 rounded-xl text-sm"
           />
         </div>
@@ -1127,10 +1303,10 @@ function TodoPage() {
 
       {/* Kanban Board */}
       <div className="flex gap-6 overflow-x-auto pb-6 flex-1 items-start min-h-[65vh]">
-        <Column 
-          title="To Do" 
-          status="pending" 
-          tasks={todoTasks} 
+        <Column
+          title="To Do"
+          status="pending"
+          tasks={todoTasks}
           colorClass="bg-slate-400"
           badgeClass="bg-slate-500/10 text-slate-400 border-slate-500/20"
           meetingsMap={meetingsMap}
@@ -1141,10 +1317,10 @@ function TodoPage() {
           onDelete={deleteTask}
           onSelectTask={setSelectedTask}
         />
-        <Column 
-          title="In Progress" 
-          status="in_progress" 
-          tasks={inProgressTasks} 
+        <Column
+          title="In Progress"
+          status="in_progress"
+          tasks={inProgressTasks}
           colorClass="bg-blue-500"
           badgeClass="bg-blue-500/10 text-blue-400 border-blue-500/20"
           meetingsMap={meetingsMap}
@@ -1155,10 +1331,10 @@ function TodoPage() {
           onDelete={deleteTask}
           onSelectTask={setSelectedTask}
         />
-        <Column 
-          title="Completed" 
-          status="done" 
-          tasks={doneTasks} 
+        <Column
+          title="Completed"
+          status="done"
+          tasks={doneTasks}
           colorClass="bg-emerald-500"
           badgeClass="bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
           meetingsMap={meetingsMap}
@@ -1178,24 +1354,28 @@ function TodoPage() {
             <div className="space-y-6 pt-2">
               <DialogHeader>
                 <div className="flex items-center justify-between gap-3 mb-1">
-                  <Badge 
-                    variant={selectedTask.status === "done" ? "secondary" : "outline"} 
+                  <Badge
+                    variant={selectedTask.status === "done" ? "secondary" : "outline"}
                     className={`px-2.5 py-1 text-xs uppercase tracking-wider font-bold ${
-                      selectedTask.status === "done" 
-                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" 
+                      selectedTask.status === "done"
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                         : selectedTask.status === "in_progress"
-                        ? "bg-blue-500/10 text-blue-400 border-blue-500/30"
-                        : "bg-slate-500/10 text-slate-300 border-white/10"
+                          ? "bg-blue-500/10 text-blue-400 border-blue-500/30"
+                          : "bg-slate-500/10 text-slate-300 border-white/10"
                     }`}
                   >
-                    {selectedTask.status === "done" ? "Completed" : selectedTask.status === "in_progress" ? "In Progress" : "To Do"}
+                    {selectedTask.status === "done"
+                      ? "Completed"
+                      : selectedTask.status === "in_progress"
+                        ? "In Progress"
+                        : "To Do"}
                   </Badge>
 
                   <div className="flex items-center gap-2">
                     {selectedTask.status !== "pending" && (
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
+                      <Button
+                        size="sm"
+                        variant="outline"
                         onClick={() => updateTaskStatus(selectedTask.id, "pending")}
                         className="text-xs glass border-white/10 h-7"
                       >
@@ -1203,9 +1383,9 @@ function TodoPage() {
                       </Button>
                     )}
                     {selectedTask.status !== "in_progress" && (
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
+                      <Button
+                        size="sm"
+                        variant="outline"
                         onClick={() => updateTaskStatus(selectedTask.id, "in_progress")}
                         className="text-xs glass border-white/10 h-7 text-blue-400"
                       >
@@ -1213,8 +1393,8 @@ function TodoPage() {
                       </Button>
                     )}
                     {selectedTask.status !== "done" && (
-                      <Button 
-                        size="sm" 
+                      <Button
+                        size="sm"
                         onClick={() => updateTaskStatus(selectedTask.id, "done")}
                         className="text-xs gradient-bg shadow-glow h-7"
                       >
@@ -1236,8 +1416,12 @@ function TodoPage() {
                     <User className="h-4 w-4 text-primary" />
                   </div>
                   <div>
-                    <div className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wider">Assigned To</div>
-                    <div className="text-sm font-bold text-white">{selectedTask.assignee || "Unassigned"}</div>
+                    <div className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wider">
+                      Assigned To
+                    </div>
+                    <div className="text-sm font-bold text-white">
+                      {selectedTask.assignee || "Unassigned"}
+                    </div>
                   </div>
                 </div>
 
@@ -1246,9 +1430,16 @@ function TodoPage() {
                     <Calendar className="h-4 w-4 text-blue-400" />
                   </div>
                   <div>
-                    <div className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wider">Due Date</div>
+                    <div className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wider">
+                      Due Date
+                    </div>
                     <div className="text-sm font-bold text-white">
-                      {safeFormatDeadline(selectedTask.deadline, selectedMeeting?.scheduled_at || selectedMeeting?.created_at || selectedTask.created_at)}
+                      {safeFormatDeadline(
+                        selectedTask.deadline,
+                        selectedMeeting?.scheduled_at ||
+                          selectedMeeting?.created_at ||
+                          selectedTask.created_at,
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1263,13 +1454,19 @@ function TodoPage() {
                         <Video className="h-4 w-4 text-primary" />
                       </div>
                       <div>
-                        <div className="text-[11px] font-bold uppercase text-primary tracking-wider">Meeting Source</div>
+                        <div className="text-[11px] font-bold uppercase text-primary tracking-wider">
+                          Meeting Source
+                        </div>
                         <h4 className="text-base font-bold text-white">{selectedMeeting.title}</h4>
                       </div>
                     </div>
 
                     <Link to="/meetings/$id" params={{ id: selectedMeeting.id }}>
-                      <Button size="sm" variant="outline" className="glass rounded-xl border-white/10 text-xs flex items-center gap-1.5 hover:bg-white/10">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="glass rounded-xl border-white/10 text-xs flex items-center gap-1.5 hover:bg-white/10"
+                      >
                         <span>Open Meeting</span>
                         <ArrowUpRight className="h-3.5 w-3.5" />
                       </Button>
@@ -1291,10 +1488,14 @@ function TodoPage() {
 
                   {selectedSummary?.key_points && selectedSummary.key_points.length > 0 && (
                     <div className="space-y-1.5">
-                      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Key Discussion Points</div>
+                      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                        Key Discussion Points
+                      </div>
                       <ul className="list-disc list-inside space-y-1 text-xs text-slate-300">
                         {selectedSummary.key_points.slice(0, 4).map((pt, idx) => (
-                          <li key={idx} className="leading-snug">{pt}</li>
+                          <li key={idx} className="leading-snug">
+                            {pt}
+                          </li>
                         ))}
                       </ul>
                     </div>
@@ -1309,9 +1510,9 @@ function TodoPage() {
 
               {/* Modal Footer */}
               <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-white/10">
-                <Button 
-                  type="button" 
-                  variant="ghost" 
+                <Button
+                  type="button"
+                  variant="ghost"
                   size="sm"
                   onClick={() => deleteTask(selectedTask.id)}
                   className="text-red-400 hover:text-red-300 hover:bg-red-500/10 text-xs"
@@ -1322,8 +1523,8 @@ function TodoPage() {
                 <div className="flex items-center gap-2">
                   {selectedTask.meeting_id && (
                     <Link to="/meetings/$id" params={{ id: selectedTask.meeting_id }}>
-                      <Button 
-                        type="button" 
+                      <Button
+                        type="button"
                         size="sm"
                         className="gradient-bg rounded-xl shadow-glow text-xs flex items-center gap-1.5"
                       >
@@ -1332,9 +1533,9 @@ function TodoPage() {
                     </Link>
                   )}
 
-                  <Button 
-                    type="button" 
-                    variant="outline" 
+                  <Button
+                    type="button"
+                    variant="outline"
                     size="sm"
                     onClick={() => setSelectedTask(null)}
                     className="glass border-white/10 text-xs rounded-xl"
@@ -1366,27 +1567,27 @@ interface ColumnProps {
   onSelectTask: (task: ActionItem) => void;
 }
 
-function Column({ 
-  title, 
-  status, 
-  tasks, 
-  colorClass, 
+function Column({
+  title,
+  status,
+  tasks,
+  colorClass,
   badgeClass,
-  meetingsMap, 
-  onDragStart, 
-  onDragOver, 
+  meetingsMap,
+  onDragStart,
+  onDragOver,
   onDrop,
   onStatusChange,
   onDelete,
-  onSelectTask
+  onSelectTask,
 }: ColumnProps) {
   const [isOver, setIsOver] = useState(false);
 
   return (
-    <div 
+    <div
       className={`flex flex-col rounded-3xl border transition-all duration-200 p-5 w-[350px] shrink-0 min-h-[60vh] shadow-xl ${
-        isOver 
-          ? "border-primary bg-[#161e2e] ring-2 ring-primary/40 shadow-[0_0_35px_rgba(59,130,246,0.3)] scale-[1.01]" 
+        isOver
+          ? "border-primary bg-[#161e2e] ring-2 ring-primary/40 shadow-[0_0_35px_rgba(59,130,246,0.3)] scale-[1.01]"
           : "border-white/5 bg-[#12151c]/90 backdrop-blur-xl"
       }`}
       onDragEnter={(e) => {
@@ -1413,7 +1614,9 @@ function Column({
           <div className={`h-4 w-1.5 rounded-full ${colorClass}`} />
           <h2 className="text-base font-bold tracking-tight text-white/90">{title}</h2>
         </div>
-        <span className={`flex h-6 min-w-[24px] px-2 items-center justify-center rounded-full text-xs font-bold border ${badgeClass}`}>
+        <span
+          className={`flex h-6 min-w-[24px] px-2 items-center justify-center rounded-full text-xs font-bold border ${badgeClass}`}
+        >
           {tasks.length}
         </span>
       </div>
@@ -1424,7 +1627,7 @@ function Column({
           const meeting = t.meeting_id ? meetingsMap.get(t.meeting_id) : null;
 
           return (
-            <div 
+            <div
               key={t.id}
               draggable
               onDragStart={(e) => onDragStart(e, t.id)}
@@ -1436,14 +1639,18 @@ function Column({
                 <h3 className="text-sm font-semibold leading-snug text-white/95 break-words flex-1 group-hover:text-primary transition-colors">
                   {t.title}
                 </h3>
-                
+
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
                     <button className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition">
                       <MoreVertical className="h-4 w-4" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="glass border-white/10" onClick={(e) => e.stopPropagation()}>
+                  <DropdownMenuContent
+                    align="end"
+                    className="glass border-white/10"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     {status !== "pending" && (
                       <DropdownMenuItem onClick={() => onStatusChange(t.id, "pending")}>
                         Move to To Do
@@ -1459,7 +1666,7 @@ function Column({
                         Mark as Completed
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem 
+                    <DropdownMenuItem
                       onClick={() => onDelete(t.id)}
                       className="text-red-400 focus:text-red-400 focus:bg-red-500/10"
                     >
@@ -1479,7 +1686,7 @@ function Column({
                 )}
 
                 {meeting ? (
-                  <div 
+                  <div
                     className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary/10 text-[11px] font-medium text-primary border border-primary/20 truncate max-w-[150px]"
                     title={`From meeting: ${meeting.title}`}
                   >
@@ -1498,7 +1705,10 @@ function Column({
                 <div className="flex items-center gap-1.5 font-medium">
                   <Calendar className="h-3.5 w-3.5 text-primary/70" />
                   <span className="text-slate-300">
-                    {safeFormatDeadline(t.deadline, meeting?.scheduled_at || meeting?.created_at || t.created_at)}
+                    {safeFormatDeadline(
+                      t.deadline,
+                      meeting?.scheduled_at || meeting?.created_at || t.created_at,
+                    )}
                   </span>
                 </div>
 
@@ -1551,13 +1761,19 @@ function Column({
             </div>
           );
         })}
-        
+
         {tasks.length === 0 && (
-          <div className={`flex-1 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 text-center text-xs font-medium transition ${
-            isOver ? "border-primary/50 bg-primary/5 text-primary" : "border-white/5 text-muted-foreground"
-          }`}>
+          <div
+            className={`flex-1 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-8 text-center text-xs font-medium transition ${
+              isOver
+                ? "border-primary/50 bg-primary/5 text-primary"
+                : "border-white/5 text-muted-foreground"
+            }`}
+          >
             <p>{isOver ? "Drop to move here!" : "No tasks in this column"}</p>
-            <p className="text-[10px] text-muted-foreground/60 mt-1">Drag and drop tasks or click buttons</p>
+            <p className="text-[10px] text-muted-foreground/60 mt-1">
+              Drag and drop tasks or click buttons
+            </p>
           </div>
         )}
       </div>

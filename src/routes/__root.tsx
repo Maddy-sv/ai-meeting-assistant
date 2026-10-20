@@ -24,7 +24,10 @@ function NotFoundComponent() {
           The page you're looking for doesn't exist or has been moved.
         </p>
         <div className="mt-6">
-          <Link to="/" className="gradient-bg inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-medium text-primary-foreground shadow-glow transition hover:opacity-90">
+          <Link
+            to="/"
+            className="gradient-bg inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-medium text-primary-foreground shadow-glow transition hover:opacity-90"
+          >
             Go home
           </Link>
         </div>
@@ -49,12 +52,18 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
-            onClick={() => { router.invalidate(); reset(); }}
+            onClick={() => {
+              router.invalidate();
+              reset();
+            }}
             className="gradient-bg inline-flex items-center justify-center rounded-full px-5 py-2 text-sm font-medium text-primary-foreground shadow-glow"
           >
             Try again
           </button>
-          <a href="/" className="glass inline-flex items-center justify-center rounded-full px-5 py-2 text-sm font-medium">
+          <a
+            href="/"
+            className="glass inline-flex items-center justify-center rounded-full px-5 py-2 text-sm font-medium"
+          >
             Go home
           </a>
         </div>
@@ -69,10 +78,21 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "AI Powered Meeting Companion — AI Workspace for Meeting Intelligence" },
-      { name: "description", content: "AI Powered Meeting Companion records, transcribes, summarizes and organizes every meeting so your team never loses a decision or action item again." },
+      {
+        name: "description",
+        content:
+          "AI Powered Meeting Companion records, transcribes, summarizes and organizes every meeting so your team never loses a decision or action item again.",
+      },
       { name: "author", content: "AI Powered Meeting Companion" },
-      { property: "og:title", content: "AI Powered Meeting Companion — AI Workspace for Meeting Intelligence" },
-      { property: "og:description", content: "Automatic transcription, AI summaries, action items and semantic search across every meeting." },
+      {
+        property: "og:title",
+        content: "AI Powered Meeting Companion — AI Workspace for Meeting Intelligence",
+      },
+      {
+        property: "og:description",
+        content:
+          "Automatic transcription, AI summaries, action items and semantic search across every meeting.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
