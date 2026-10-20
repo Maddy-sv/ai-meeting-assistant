@@ -70,7 +70,7 @@ function AdminUsers() {
           title: pending.user.is_admin ? "Remove admin role?" : "Make this user an admin?",
           description: pending.user.is_admin
             ? `${label(pending.user)} will lose access to the admin area.`
-            : `${label(pending.user)} will be able to see every user, meeting and AI usage statistic.`,
+            : `${label(pending.user)} will be able to see every user and meeting.`,
           confirmLabel: pending.user.is_admin ? "Remove admin" : "Make admin",
           destructive: pending.user.is_admin,
         }

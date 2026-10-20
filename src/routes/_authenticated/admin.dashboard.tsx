@@ -2,8 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
-  Activity,
-  AlertTriangle,
   ArrowRight,
   CheckCircle2,
   FileText,
@@ -12,7 +10,6 @@ import {
   UserCheck,
   Users,
   Video,
-  Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -88,25 +85,6 @@ function AdminDashboard() {
             icon={ListChecks}
             loading={overview.isLoading}
             value={o?.action_items ?? 0}
-          />
-          <StatTile
-            label="AI requests"
-            icon={Zap}
-            loading={overview.isLoading}
-            value={o?.ai_requests ?? 0}
-            hint="All time"
-          />
-          <StatTile
-            label="AI today"
-            icon={Activity}
-            loading={overview.isLoading}
-            value={o?.ai_requests_today ?? 0}
-          />
-          <StatTile
-            label="AI failures today"
-            icon={AlertTriangle}
-            loading={overview.isLoading}
-            value={o?.ai_failures_today ?? 0}
           />
         </div>
       )}

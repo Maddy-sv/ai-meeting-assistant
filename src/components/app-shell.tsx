@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useRouter, useRouterState, type LinkProps } from "@tanstack/react-router";
 import {
-  Bot,
   CalendarDays,
   FolderKanban,
   LayoutDashboard,
@@ -59,7 +58,6 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/admin/dashboard", label: "Admin overview", icon: ShieldCheck },
   { to: "/admin/users", label: "Users", icon: Users },
   { to: "/admin/meetings", label: "Meetings", icon: Video },
-  { to: "/admin/ai", label: "AI usage", icon: Bot },
 ];
 
 function isActive(pathname: string, item: NavItem) {

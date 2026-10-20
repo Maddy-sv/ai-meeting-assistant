@@ -437,7 +437,6 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      admin_ai_usage: { Args: never; Returns: Json };
       admin_list_meetings: {
         Args: never;
         Returns: {

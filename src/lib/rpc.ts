@@ -31,9 +31,6 @@ export interface AdminOverview {
   transcripts: number;
   summaries: number;
   action_items: number;
-  ai_requests: number;
-  ai_requests_today: number;
-  ai_failures_today: number;
 }
 export async function adminOverview(): Promise<AdminOverview> {
   return rpcData(
@@ -80,18 +77,6 @@ export async function adminSetUserRole(target: string, makeAdmin: boolean): Prom
 
 export async function adminSetUserActive(target: string, active: boolean): Promise<void> {
   rpcData("admin_set_user_active", await supabase.rpc("admin_set_user_active", { target, active }));
-}
-
-export interface AdminAiUsage {
-  total: number;
-  today: number;
-  failures_today: number;
-  avg_duration_ms: number | null;
-  by_function: { fn: string; count: number; failures: number }[];
-  daily: { day: string; count: number }[];
-}
-export async function adminAiUsage(): Promise<AdminAiUsage> {
-  return rpcData("admin_ai_usage", await supabase.rpc("admin_ai_usage")) as unknown as AdminAiUsage;
 }
 
 export type SearchResultKind = "meeting" | "transcript" | "summary" | "task" | "decision";

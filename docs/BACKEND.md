@@ -22,7 +22,7 @@ Apply the files in `supabase/migrations/` in filename order:
    - `meetings.status` is limited to `upcoming`, `live` or `completed` (old `in_progress` rows become `live`, unknown values become `upcoming`);
    - `is_active_user()`: disabled accounts can still read their own data but cannot insert, update or delete it;
    - `my_open_task_count()` for the dashboard.
-7. `20261020150000_remove_demo_seed.sql`: removes the demo-data function; the app only shows real recorded data.
+7. `20261020150000_remove_demo_seed.sql`: removes the demo-data function and the admin AI-usage report.
 
 How to apply them:
 

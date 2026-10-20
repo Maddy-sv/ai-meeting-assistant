@@ -21,7 +21,6 @@ import { Route as AuthenticatedProfileRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedSearchRouteImport } from './routes/_authenticated/search'
 import { Route as AuthenticatedTodoRouteImport } from './routes/_authenticated/todo'
 import { Route as AuthenticatedAdminIndexRouteImport } from './routes/_authenticated/admin.index'
-import { Route as AuthenticatedAdminAiRouteImport } from './routes/_authenticated/admin.ai'
 import { Route as AuthenticatedAdminDashboardRouteImport } from './routes/_authenticated/admin.dashboard'
 import { Route as AuthenticatedAdminMeetingsRouteImport } from './routes/_authenticated/admin.meetings'
 import { Route as AuthenticatedAdminUsersRouteImport } from './routes/_authenticated/admin.users'
@@ -90,11 +89,6 @@ const AuthenticatedAdminIndexRoute = AuthenticatedAdminIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedAdminRoute,
 } as any)
-const AuthenticatedAdminAiRoute = AuthenticatedAdminAiRouteImport.update({
-  id: '/ai',
-  path: '/ai',
-  getParentRoute: () => AuthenticatedAdminRoute,
-} as any)
 const AuthenticatedAdminDashboardRoute =
   AuthenticatedAdminDashboardRouteImport.update({
     id: '/dashboard',
@@ -152,7 +146,6 @@ export interface FileRoutesByFullPath {
   '/profile': typeof AuthenticatedProfileRoute
   '/search': typeof AuthenticatedSearchRoute
   '/todo': typeof AuthenticatedTodoRoute
-  '/admin/ai': typeof AuthenticatedAdminAiRoute
   '/admin/dashboard': typeof AuthenticatedAdminDashboardRoute
   '/admin/meetings': typeof AuthenticatedAdminMeetingsRoute
   '/admin/users': typeof AuthenticatedAdminUsersRoute
@@ -173,7 +166,6 @@ export interface FileRoutesByTo {
   '/profile': typeof AuthenticatedProfileRoute
   '/search': typeof AuthenticatedSearchRoute
   '/todo': typeof AuthenticatedTodoRoute
-  '/admin/ai': typeof AuthenticatedAdminAiRoute
   '/admin/dashboard': typeof AuthenticatedAdminDashboardRoute
   '/admin/meetings': typeof AuthenticatedAdminMeetingsRoute
   '/admin/users': typeof AuthenticatedAdminUsersRoute
@@ -197,7 +189,6 @@ export interface FileRoutesById {
   '/_authenticated/profile': typeof AuthenticatedProfileRoute
   '/_authenticated/search': typeof AuthenticatedSearchRoute
   '/_authenticated/todo': typeof AuthenticatedTodoRoute
-  '/_authenticated/admin/ai': typeof AuthenticatedAdminAiRoute
   '/_authenticated/admin/dashboard': typeof AuthenticatedAdminDashboardRoute
   '/_authenticated/admin/meetings': typeof AuthenticatedAdminMeetingsRoute
   '/_authenticated/admin/users': typeof AuthenticatedAdminUsersRoute
@@ -221,7 +212,6 @@ export interface FileRouteTypes {
     | '/profile'
     | '/search'
     | '/todo'
-    | '/admin/ai'
     | '/admin/dashboard'
     | '/admin/meetings'
     | '/admin/users'
@@ -242,7 +232,6 @@ export interface FileRouteTypes {
     | '/profile'
     | '/search'
     | '/todo'
-    | '/admin/ai'
     | '/admin/dashboard'
     | '/admin/meetings'
     | '/admin/users'
@@ -265,7 +254,6 @@ export interface FileRouteTypes {
     | '/_authenticated/profile'
     | '/_authenticated/search'
     | '/_authenticated/todo'
-    | '/_authenticated/admin/ai'
     | '/_authenticated/admin/dashboard'
     | '/_authenticated/admin/meetings'
     | '/_authenticated/admin/users'
@@ -370,13 +358,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAdminIndexRouteImport
       parentRoute: typeof AuthenticatedAdminRoute
     }
-    '/_authenticated/admin/ai': {
-      id: '/_authenticated/admin/ai'
-      path: '/ai'
-      fullPath: '/admin/ai'
-      preLoaderRoute: typeof AuthenticatedAdminAiRouteImport
-      parentRoute: typeof AuthenticatedAdminRoute
-    }
     '/_authenticated/admin/dashboard': {
       id: '/_authenticated/admin/dashboard'
       path: '/dashboard'
@@ -437,7 +418,6 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedAdminRouteChildren {
-  AuthenticatedAdminAiRoute: typeof AuthenticatedAdminAiRoute
   AuthenticatedAdminDashboardRoute: typeof AuthenticatedAdminDashboardRoute
   AuthenticatedAdminMeetingsRoute: typeof AuthenticatedAdminMeetingsRoute
   AuthenticatedAdminUsersRoute: typeof AuthenticatedAdminUsersRoute
@@ -445,7 +425,6 @@ interface AuthenticatedAdminRouteChildren {
 }
 
 const AuthenticatedAdminRouteChildren: AuthenticatedAdminRouteChildren = {
-  AuthenticatedAdminAiRoute: AuthenticatedAdminAiRoute,
   AuthenticatedAdminDashboardRoute: AuthenticatedAdminDashboardRoute,
   AuthenticatedAdminMeetingsRoute: AuthenticatedAdminMeetingsRoute,
   AuthenticatedAdminUsersRoute: AuthenticatedAdminUsersRoute,
