@@ -1,19 +1,14 @@
+import { useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import { FolderKanban, Plus, Search, Trash2, Video, X } from "lucide-react";
+import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { formatDuration } from "@/lib/mock-data";
-import { Video, Plus, ArrowRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -21,306 +16,399 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { toast } from "sonner";
+import {
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  Section,
+  StatusBadge,
+} from "@/components/layout";
+import { ScheduleMeetingDialog } from "@/components/schedule/schedule-meeting-dialog";
+import { useUser } from "@/lib/auth";
+import { formatDuration, platformLabel } from "@/lib/format";
+import { dataKeys, listMyMeetings, listProjects, type MeetingListRow } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/meetings/")({
   head: () => ({ meta: [{ title: "Meetings — AI Powered Meeting Companion" }] }),
   component: MeetingsList,
 });
 
-type Meeting = {
-  id: string;
-  title: string;
-  platform: string;
-  status: string;
-  scheduled_at: string | null;
-  started_at: string | null;
-  duration_seconds: number | null;
-  meeting_link: string | null;
-};
+type StatusFilter = "all" | "upcoming" | "live" | "completed";
+
+const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: "all", label: "All statuses" },
+  { value: "upcoming", label: "Upcoming" },
+  { value: "live", label: "Live" },
+  { value: "completed", label: "Completed" },
+];
+
+async function deleteMeetings(ids: string[]) {
+  const { data, error } = await supabase.from("meetings").delete().in("id", ids).select("id");
+  if (error) {
+    console.error("[meetings] delete failed", error);
+    throw new Error(
+      ids.length === 1 ? "Could not delete the meeting." : "Could not delete the meetings.",
+    );
+  }
+  if ((data?.length ?? 0) < ids.length) {
+    throw new Error("Some meetings could not be deleted. You can only delete meetings you host.");
+  }
+}
+
+function meetingTime(m: MeetingListRow) {
+  return m.started_at ?? m.scheduled_at ?? m.created_at;
+}
 
 function MeetingsList() {
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [link, setLink] = useState("");
-  const [platform, setPlatform] = useState("google_meet");
-  const [projectId, setProjectId] = useState<string>("none");
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
-    try {
-      const saved = sessionStorage.getItem("selectedMeetings");
-      if (saved) return new Set(JSON.parse(saved));
-    } catch {}
-    return new Set();
+  const user = useUser();
+  const userId = user?.id ?? "";
+  const queryClient = useQueryClient();
+
+  const meetings = useQuery({
+    queryKey: dataKeys.myMeetings(userId),
+    queryFn: () => listMyMeetings(userId),
+    enabled: !!user,
+  });
+  const projects = useQuery({
+    queryKey: dataKeys.projects(userId),
+    queryFn: () => listProjects(userId),
+    enabled: !!user,
   });
 
-  useEffect(() => {
-    sessionStorage.setItem("selectedMeetings", JSON.stringify(Array.from(selectedIds)));
-  }, [selectedIds]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<StatusFilter>("all");
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
-  const isSelectionMode = selectedIds.size > 0;
+  const projectNames = useMemo(
+    () => new Map((projects.data ?? []).map((p) => [p.id, p.name])),
+    [projects.data],
+  );
 
-  async function load() {
-    const { data: u } = await supabase.auth.getUser();
-    if (u.user) {
-      supabase
-        .from("projects")
-        .select("id, name")
-        .eq("owner_id", u.user.id)
-        .then(({ data }) => setProjects(data ?? []));
-    }
-    const { data } = await supabase
-      .from("meetings")
-      .select("*")
-      .order("created_at", { ascending: false });
-    setMeetings((data as Meeting[]) ?? []);
-  }
-  useEffect(() => {
-    load();
-  }, []);
-
-  async function create(e: React.FormEvent) {
-    e.preventDefault();
-    const { data: u } = await supabase.auth.getUser();
-    if (!u.user) return;
-    const { error } = await supabase.from("meetings").insert({
-      host_id: u.user.id,
-      title,
-      platform,
-      meeting_link: link,
-      project_id: projectId === "none" ? null : projectId,
-      scheduled_at: new Date().toISOString(),
-      status: "upcoming",
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return (meetings.data ?? []).filter((m) => {
+      if (status !== "all" && m.status !== status) return false;
+      if (!term) return true;
+      const project = m.project_id ? (projectNames.get(m.project_id) ?? "") : "";
+      return m.title.toLowerCase().includes(term) || project.toLowerCase().includes(term);
     });
-    if (error) return toast.error(error.message);
-    toast.success("Meeting created");
-    setOpen(false);
-    setTitle("");
-    setLink("");
-    setProjectId("none");
-    await load();
+  }, [meetings.data, search, status, projectNames]);
+
+  const active = filtered
+    .filter((m) => m.status !== "completed")
+    .sort((a, b) => {
+      if (a.status === "live" && b.status !== "live") return -1;
+      if (b.status === "live" && a.status !== "live") return 1;
+      return meetingTime(a).localeCompare(meetingTime(b));
+    });
+  const past = filtered
+    .filter((m) => m.status === "completed")
+    .sort((a, b) => meetingTime(b).localeCompare(meetingTime(a)));
+
+  // Only keep selections that are still visible.
+  const visibleIds = new Set(filtered.map((m) => m.id));
+  const selectedVisible = [...selected].filter((id) => visibleIds.has(id));
+  const allVisibleSelected = filtered.length > 0 && selectedVisible.length === filtered.length;
+
+  function toggle(id: string, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   }
 
-  async function removeMeeting(id: string) {
-    if (!window.confirm("Are you sure you want to delete this meeting?")) return;
-    const { error } = await supabase.from("meetings").delete().eq("id", id);
-    if (error) return toast.error(error.message);
-    toast.success("Meeting removed");
-    await load();
+  function toggleAll(checked: boolean) {
+    setSelected(checked ? new Set(filtered.map((m) => m.id)) : new Set());
   }
 
-  async function bulkRemove() {
-    if (!window.confirm(`Are you sure you want to delete ${selectedIds.size} meetings?`)) return;
-    const { error } = await supabase.from("meetings").delete().in("id", Array.from(selectedIds));
-    if (error) return toast.error(error.message);
-    toast.success(`${selectedIds.size} meetings removed`);
-    setSelectedIds(new Set());
-    await load();
+  async function refresh() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["meetings"] }),
+      queryClient.invalidateQueries({ queryKey: ["project"] }),
+      queryClient.invalidateQueries({ queryKey: ["user-dashboard"] }),
+    ]);
   }
 
-  function toggleSelection(id: string) {
-    const next = new Set(selectedIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelectedIds(next);
+  async function removeOne(m: MeetingListRow) {
+    await deleteMeetings([m.id]);
+    toast.success(`Deleted "${m.title}".`);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.delete(m.id);
+      return next;
+    });
+    await refresh();
   }
 
-  const upcoming = meetings.filter((m) => m.status !== "completed");
-  const past = meetings.filter((m) => m.status === "completed");
+  async function removeSelected() {
+    const ids = selectedVisible;
+    await deleteMeetings(ids);
+    toast.success(`Deleted ${ids.length} meeting${ids.length === 1 ? "" : "s"}.`);
+    setSelected(new Set());
+    await refresh();
+  }
+
+  const total = meetings.data?.length ?? 0;
+  const filtersActive = search.trim() !== "" || status !== "all";
 
   return (
     <div className="space-y-8">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight">Meetings</h1>
-          <p className="text-sm text-muted-foreground">
-            Connect a platform or add a meeting link and let AI Powered Meeting Companion join.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          {isSelectionMode && (
-            <Button variant="destructive" className="rounded-full shadow-glow" onClick={bulkRemove}>
-              <Trash2 className="mr-2 h-4 w-4" /> Delete {selectedIds.size}
+      <PageHeader
+        title="Meetings"
+        description="Schedule meetings, open past ones and review their summaries."
+        actions={
+          <Button variant="brand" onClick={() => setCreateOpen(true)}>
+            <Plus /> New meeting
+          </Button>
+        }
+      />
+
+      <ScheduleMeetingDialog open={createOpen} onOpenChange={setCreateOpen} title="New meeting" />
+
+      {meetings.isLoading && <LoadingState variant="list" rows={5} label="Loading meetings…" />}
+
+      {meetings.isError && (
+        <ErrorState message={meetings.error.message} onRetry={() => meetings.refetch()} />
+      )}
+
+      {meetings.data && total === 0 && (
+        <EmptyState
+          icon={Video}
+          title="No meetings yet"
+          description="Create your first meeting to start capturing transcripts, summaries and action items."
+          action={
+            <Button variant="brand" onClick={() => setCreateOpen(true)}>
+              <Plus /> New meeting
             </Button>
-          )}
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button className="gradient-bg rounded-full shadow-glow">
-                <Plus className="mr-2 h-4 w-4" /> New meeting
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="glass border-white/10">
-              <DialogHeader>
-                <DialogTitle>Start a meeting</DialogTitle>
-              </DialogHeader>
-              <form onSubmit={create} className="space-y-4">
-                <div>
-                  <Label>Title</Label>
-                  <Input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    required
-                    className="glass mt-1 border-white/10"
+          }
+        />
+      )}
+
+      {meetings.data && total > 0 && (
+        <>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="meeting-search">Search meetings</Label>
+              <div className="relative">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden
+                />
+                <Input
+                  id="meeting-search"
+                  type="search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Title or project…"
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5 sm:w-48">
+              <Label htmlFor="meeting-status">Status</Label>
+              <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
+                <SelectTrigger id="meeting-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_FILTERS.map((f) => (
+                    <SelectItem key={f.value} value={f.value}>
+                      {f.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {filtered.length > 0 && (
+            <div className="glass flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="select-all-meetings"
+                  checked={
+                    allVisibleSelected ? true : selectedVisible.length > 0 ? "indeterminate" : false
+                  }
+                  onCheckedChange={(c) => toggleAll(c === true)}
+                />
+                <Label htmlFor="select-all-meetings" className="cursor-pointer text-sm">
+                  {selectedVisible.length > 0
+                    ? `${selectedVisible.length} selected`
+                    : `Select all (${filtered.length})`}
+                </Label>
+              </div>
+              {selectedVisible.length > 0 && (
+                <div className="ml-auto flex flex-wrap gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                    <X /> Clear
+                  </Button>
+                  <ConfirmDialog
+                    title={`Delete ${selectedVisible.length} meeting${selectedVisible.length === 1 ? "" : "s"}?`}
+                    description="Their transcripts, summaries, action items and decisions will be deleted too. This cannot be undone."
+                    confirmLabel="Delete"
+                    destructive
+                    onConfirm={removeSelected}
+                    trigger={
+                      <Button variant="destructive" size="sm" className="rounded-full">
+                        <Trash2 /> Delete selected
+                      </Button>
+                    }
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Platform</Label>
-                    <Select value={platform} onValueChange={setPlatform}>
-                      <SelectTrigger className="glass mt-1 border-white/10">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="google_meet">Google Meet</SelectItem>
-                        <SelectItem value="teams">Microsoft Teams</SelectItem>
-                        <SelectItem value="manual">Manual link</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Project (Optional)</Label>
-                    <Select value={projectId} onValueChange={setProjectId}>
-                      <SelectTrigger className="glass mt-1 border-white/10">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No Project</SelectItem>
-                        {projects.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div>
-                  <Label>Meeting link</Label>
-                  <Input
-                    value={link}
-                    onChange={(e) => setLink(e.target.value)}
-                    placeholder="https://…"
-                    className="glass mt-1 border-white/10"
-                  />
-                </div>
-                <Button type="submit" className="gradient-bg w-full rounded-full">
-                  Create
-                </Button>
-              </form>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </header>
-
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-widest text-muted-foreground">
-          Upcoming & live
-        </h2>
-        <div className="grid gap-3 md:grid-cols-2">
-          {upcoming.length === 0 && (
-            <p className="text-sm text-muted-foreground">No upcoming meetings.</p>
+              )}
+            </div>
           )}
-          {upcoming.map((m) => (
-            <MeetingCard
-              key={m.id}
-              m={m}
-              onRemove={removeMeeting}
-              selected={selectedIds.has(m.id)}
-              onToggle={toggleSelection}
-              isSelectionMode={isSelectionMode}
-            />
-          ))}
-        </div>
-      </section>
 
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-widest text-muted-foreground">
-          Past meetings
-        </h2>
-        <div className="grid gap-3 md:grid-cols-2">
-          {past.length === 0 && (
-            <p className="text-sm text-muted-foreground">No past meetings yet.</p>
-          )}
-          {past.map((m) => (
-            <MeetingCard
-              key={m.id}
-              m={m}
-              onRemove={removeMeeting}
-              selected={selectedIds.has(m.id)}
-              onToggle={toggleSelection}
-              isSelectionMode={isSelectionMode}
+          {filtered.length === 0 && (
+            <EmptyState
+              icon={Search}
+              title="No meetings match"
+              description="Try a different search term or status."
+              action={
+                filtersActive && (
+                  <Button
+                    variant="glass"
+                    onClick={() => {
+                      setSearch("");
+                      setStatus("all");
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                )
+              }
             />
-          ))}
-        </div>
-      </section>
+          )}
+
+          {active.length > 0 && (
+            <Section title="Upcoming & live">
+              <MeetingList
+                meetings={active}
+                projectNames={projectNames}
+                selected={selected}
+                onToggle={toggle}
+                onDelete={removeOne}
+              />
+            </Section>
+          )}
+
+          {past.length > 0 && (
+            <Section title="Past meetings">
+              <MeetingList
+                meetings={past}
+                projectNames={projectNames}
+                selected={selected}
+                onToggle={toggle}
+                onDelete={removeOne}
+              />
+            </Section>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-function MeetingCard({
-  m,
-  onRemove,
+function MeetingList({
+  meetings,
+  projectNames,
   selected,
   onToggle,
-  isSelectionMode,
+  onDelete,
 }: {
-  m: Meeting;
-  onRemove: (id: string) => void;
-  selected: boolean;
-  onToggle: (id: string) => void;
-  isSelectionMode: boolean;
+  meetings: MeetingListRow[];
+  projectNames: Map<string, string>;
+  selected: Set<string>;
+  onToggle: (id: string, checked: boolean) => void;
+  onDelete: (m: MeetingListRow) => Promise<void>;
 }) {
   return (
-    <div
-      className={`glass group relative flex flex-col justify-between rounded-2xl p-5 transition hover:shadow-glow ${selected ? "border-red-500/50 bg-red-500/10" : ""}`}
+    <ul className="grid gap-3 md:grid-cols-2">
+      {meetings.map((m) => (
+        <MeetingRow
+          key={m.id}
+          meeting={m}
+          projectName={m.project_id ? projectNames.get(m.project_id) : undefined}
+          selected={selected.has(m.id)}
+          onToggle={onToggle}
+          onDelete={onDelete}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function MeetingRow({
+  meeting: m,
+  projectName,
+  selected,
+  onToggle,
+  onDelete,
+}: {
+  meeting: MeetingListRow;
+  projectName?: string;
+  selected: boolean;
+  onToggle: (id: string, checked: boolean) => void;
+  onDelete: (m: MeetingListRow) => Promise<void>;
+}) {
+  const when = m.started_at ?? m.scheduled_at;
+  const checkboxId = `select-meeting-${m.id}`;
+  return (
+    <li
+      className={`glass group flex items-start gap-3 rounded-2xl p-4 transition hover:shadow-glow focus-within:shadow-glow ${
+        selected ? "ring-2 ring-primary/60" : ""
+      }`}
     >
-      <Link to="/meetings/$id" params={{ id: m.id }} className="flex flex-col flex-1">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3 min-w-0 pr-8">
-            <div
-              className="mt-1 shrink-0 z-20"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onToggle(m.id);
-              }}
-            >
-              <Checkbox
-                checked={selected}
-                className={`transition-opacity ${isSelectionMode || selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"} data-[state=checked]:bg-red-500 data-[state=checked]:text-white border-white/20`}
-              />
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-base font-semibold">{m.title}</div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {m.platform.replace("_", " ")} · {m.status}
-                {m.scheduled_at && ` · ${new Date(m.scheduled_at).toLocaleString()}`}
-                {m.duration_seconds ? ` · ${formatDuration(m.duration_seconds)}` : ""}
-              </div>
-            </div>
-          </div>
-          <div className="gradient-bg grid h-10 w-10 shrink-0 place-items-center rounded-xl">
-            <Video className="h-4 w-4 text-primary-foreground" />
-          </div>
-        </div>
-        <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
-          <span>Open meeting</span>
-          <ArrowRight className="h-4 w-4" />
-        </div>
-      </Link>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="absolute right-2 top-2 z-10 opacity-0 transition group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-400 rounded-full"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onRemove(m.id);
-        }}
+      <Checkbox
+        id={checkboxId}
+        checked={selected}
+        onCheckedChange={(c) => onToggle(m.id, c === true)}
+        aria-label={`Select ${m.title}`}
+        className="mt-1"
+      />
+      <Link
+        to="/meetings/$id"
+        params={{ id: m.id }}
+        className="min-w-0 flex-1 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <Trash2 className="h-4 w-4" />
-      </Button>
-    </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="truncate font-semibold">{m.title}</span>
+          <StatusBadge status={m.status} />
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {platformLabel(m.platform)}
+          {when && ` · ${format(new Date(when), "EEE d MMM yyyy, HH:mm")}`}
+          {m.duration_seconds ? ` · ${formatDuration(m.duration_seconds)}` : ""}
+        </div>
+        {projectName && (
+          <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+            <FolderKanban className="h-3 w-3" aria-hidden />
+            {projectName}
+          </div>
+        )}
+      </Link>
+      <ConfirmDialog
+        title={`Delete "${m.title}"?`}
+        description="Its transcript, summary, action items and decisions will be deleted too. This cannot be undone."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => onDelete(m)}
+        trigger={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Delete ${m.title}`}
+            className="shrink-0 rounded-full text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 sm:opacity-0"
+          >
+            <Trash2 />
+          </Button>
+        }
+      />
+    </li>
   );
 }
