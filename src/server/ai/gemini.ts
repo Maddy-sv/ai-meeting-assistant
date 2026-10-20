@@ -36,6 +36,20 @@ export interface GenerateResult {
   model: string;
 }
 
+export const AI_KEY_INVALID_MESSAGE =
+  "Invalid Gemini API key. Ask the administrator to set a valid GEMINI_API_KEY from Google AI Studio.";
+export const AI_QUOTA_MESSAGE =
+  "AI rate limit reached. The request was retried automatically. Please wait a few seconds and click Retry.";
+export const AI_BUSY_MESSAGE =
+  "The AI model is currently experiencing high demand. Please try again in a few moments.";
+
+export class AiQuotaError extends Error {
+  constructor() {
+    super(AI_QUOTA_MESSAGE);
+    this.name = "AiQuotaError";
+  }
+}
+
 type Failure = "auth" | "quota" | "transient" | "not_found" | "timeout" | "other";
 
 function classify(err: unknown): Failure {
@@ -78,7 +92,7 @@ export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
           err instanceof Error ? err.message : err,
         );
         if (last === "auth") {
-          throw new Error("The AI service rejected the server's credentials.");
+          throw new Error(AI_KEY_INVALID_MESSAGE);
         }
         if (last === "timeout") {
           throw new Error("The AI service took too long to respond. Please try again.");
@@ -94,9 +108,8 @@ export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
     }
   }
 
-  if (last === "quota") {
-    throw new Error("The AI service quota is exhausted. Please try again later.");
-  }
+  if (last === "quota") throw new AiQuotaError();
+  if (last === "transient") throw new Error(AI_BUSY_MESSAGE);
   throw new Error("The AI service is unavailable right now. Please try again in a minute.");
 }
 
