@@ -76,5 +76,6 @@ docs/                     backend guide and the original product brief
 ## Documentation
 
 - [docs/BACKEND.md](docs/BACKEND.md): migrations, secrets, first admin, reminders, demo data, AI limits
+- [docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md): turning on Google sign-in and calendar import (off by default)
 - [REVAMP_PLAN.md](REVAMP_PLAN.md): audit and revamp plan
 - [docs/ORIGINAL_SPEC.md](docs/ORIGINAL_SPEC.md): the original product brief

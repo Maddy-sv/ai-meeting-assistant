@@ -8,6 +8,7 @@ import type { UserIdentity } from "@supabase/supabase-js";
 import { CheckCircle2, FlaskConical, KeyRound, Link2, Loader2, LogOut, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { GOOGLE_ENABLED } from "@/lib/features";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -135,7 +136,7 @@ function ProfilePage() {
       {user && profile.isSuccess && (
         <>
           <ProfileDetails profile={profile.data} />
-          <ConnectedAccounts />
+          {GOOGLE_ENABLED && <ConnectedAccounts />}
           <SecurityCard />
           <DemoWorkspaceCard />
         </>

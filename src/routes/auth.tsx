@@ -17,6 +17,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { supabase } from "@/integrations/supabase/client";
+import { GOOGLE_ENABLED } from "@/lib/features";
 import { rememberPostAuthRedirect, safeRedirect, useSession } from "@/lib/auth";
 
 type Mode = "signin" | "signup" | "forgot" | "check-email";
@@ -131,7 +132,7 @@ function AuthPage() {
           <h1 className="text-2xl font-bold">{heading[mode].title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{heading[mode].subtitle}</p>
 
-          {(mode === "signin" || mode === "signup") && (
+          {GOOGLE_ENABLED && (mode === "signin" || mode === "signup") && (
             <>
               <GoogleButton redirectTo={redirectTo} />
               <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">

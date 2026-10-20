@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { GOOGLE_ENABLED } from "@/lib/features";
 import { Button } from "@/components/ui/button";
 import {
   EmptyState,
@@ -249,37 +250,39 @@ function CalendarPage() {
         }
       />
 
-      <Section card title="Google Calendar">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-muted-foreground">
-            {!googleLinked
-              ? "Connect your Google account to import upcoming events as meetings (read-only access)."
-              : canImport
-                ? "Google is connected. Import brings in your upcoming events; events you already imported are skipped."
-                : "Google is connected, but import needs fresh access. Google only shares calendar access for a short time after you sign in, so reconnect to import again."}
-          </p>
-          <div className="flex shrink-0 flex-wrap gap-2">
-            {!googleLinked && (
-              <Button variant="glass" onClick={connectGoogle} disabled={connecting}>
-                {connecting ? <Loader2 className="animate-spin" /> : <Link2 />}
-                Connect Google Calendar
-              </Button>
-            )}
-            {googleLinked && canImport && (
-              <Button variant="glass" onClick={importFromGoogle} disabled={importing}>
-                {importing ? <Loader2 className="animate-spin" /> : <Download />}
-                {importing ? "Importing…" : "Import from Google"}
-              </Button>
-            )}
-            {googleLinked && !canImport && (
-              <Button variant="glass" onClick={reconnectGoogle} disabled={connecting}>
-                {connecting ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-                Reconnect Google to import
-              </Button>
-            )}
+      {GOOGLE_ENABLED && (
+        <Section card title="Google Calendar">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              {!googleLinked
+                ? "Connect your Google account to import upcoming events as meetings (read-only access)."
+                : canImport
+                  ? "Google is connected. Import brings in your upcoming events; events you already imported are skipped."
+                  : "Google is connected, but import needs fresh access. Google only shares calendar access for a short time after you sign in, so reconnect to import again."}
+            </p>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {!googleLinked && (
+                <Button variant="glass" onClick={connectGoogle} disabled={connecting}>
+                  {connecting ? <Loader2 className="animate-spin" /> : <Link2 />}
+                  Connect Google Calendar
+                </Button>
+              )}
+              {googleLinked && canImport && (
+                <Button variant="glass" onClick={importFromGoogle} disabled={importing}>
+                  {importing ? <Loader2 className="animate-spin" /> : <Download />}
+                  {importing ? "Importing…" : "Import from Google"}
+                </Button>
+              )}
+              {googleLinked && !canImport && (
+                <Button variant="glass" onClick={reconnectGoogle} disabled={connecting}>
+                  {connecting ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                  Reconnect Google to import
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
-      </Section>
+        </Section>
+      )}
 
       {tomorrowCount > 0 && (
         <div
