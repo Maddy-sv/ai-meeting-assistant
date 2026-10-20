@@ -1,259 +1,471 @@
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { ShieldCheck, Sparkles, User as UserIcon } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { ArrowLeft, Loader2, MailCheck, Sparkles } from "lucide-react";
+import { toast } from "sonner";
+import type { AuthError } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
+import { lovable } from "@/integrations/lovable";
+import { rememberPostAuthRedirect, safeRedirect, useSession } from "@/lib/auth";
+
+type Mode = "signin" | "signup" | "forgot" | "check-email";
+
+interface AuthSearch {
+  redirect?: string;
+  mode?: "signin" | "signup" | "forgot";
+}
 
 export const Route = createFileRoute("/auth")({
+  validateSearch: (search: Record<string, unknown>): AuthSearch => ({
+    redirect: typeof search.redirect === "string" ? search.redirect : undefined,
+    mode:
+      search.mode === "signup" || search.mode === "forgot" || search.mode === "signin"
+        ? search.mode
+        : undefined,
+  }),
   head: () => ({
     meta: [
-      { title: "Sign in — AI Powered Meeting Companion" },
+      { title: "Sign in — AI Meeting Companion" },
       {
         name: "description",
-        content: "Sign in to AI Powered Meeting Companion and let AI handle your meetings.",
+        content: "Sign in to AI Meeting Companion and let AI handle your meeting notes.",
       },
     ],
   }),
   component: AuthPage,
 });
 
+/* ------------------------------------------------------------- helpers */
+
+const emailField = z.string().trim().min(1, "Enter your email").email("Enter a valid email");
+const newPasswordField = z
+  .string()
+  .min(8, "Use at least 8 characters")
+  .max(72, "Use at most 72 characters");
+
+const signInSchema = z.object({
+  email: emailField,
+  password: z.string().min(1, "Enter your password"),
+});
+const signUpSchema = z
+  .object({
+    name: z.string().trim().min(1, "Enter your name").max(100, "Name is too long"),
+    email: emailField,
+    password: newPasswordField,
+    confirmPassword: z.string(),
+  })
+  .refine((v) => v.password === v.confirmPassword, {
+    path: ["confirmPassword"],
+    message: "Passwords do not match",
+  });
+const forgotSchema = z.object({ email: emailField });
+
+function emailRedirectUrl() {
+  return `${window.location.origin}/auth`;
+}
+
+/** Maps Supabase auth errors to generic, non-enumerating messages. */
+function authErrorMessage(error: AuthError | Error, fallback: string): string {
+  const code = "code" in error ? error.code : undefined;
+  const status = "status" in error ? error.status : undefined;
+  if (status === 429 || code?.startsWith("over_")) {
+    return "Too many attempts. Please wait a minute and try again.";
+  }
+  if (code === "weak_password") {
+    return "That password is too weak or has appeared in a data breach. Please choose another.";
+  }
+  return fallback;
+}
+
+/* ---------------------------------------------------------------- page */
+
 function AuthPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<"signin" | "signup" | "reset">("signin");
-  const [role, setRole] = useState<"student" | "admin">("student");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [loading, setLoading] = useState(false);
+  const search = Route.useSearch();
+  const { session, loading } = useSession();
+  const redirectTo = safeRedirect(search.redirect);
+  const [mode, setMode] = useState<Mode>(search.mode ?? "signin");
+  const [pendingEmail, setPendingEmail] = useState("");
 
+  // Already signed in (or just signed in, confirmed an email, or returned from Google): continue.
   useEffect(() => {
-    let mounted = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (mounted && data.session) router.navigate({ to: "/dashboard", replace: true });
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [router]);
-
-  async function verifyAdminAndRedirect(userId: string) {
-    const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", userId);
-    const isAdmin = (roles ?? []).some((r: any) => r.role === "admin");
-
-    if (isAdmin) {
-      toast.success("Admin access granted.");
-      router.navigate({ to: "/admin/dashboard", replace: true });
-    } else {
-      toast.error("Access Denied: You are not an administrator.");
-      await supabase.auth.signOut();
+    if (!loading && session && mode !== "check-email") {
+      router.history.replace(redirectTo);
     }
+  }, [loading, session, mode, redirectTo, router]);
+
+  function showCheckEmail(email: string) {
+    setPendingEmail(email);
+    setMode("check-email");
   }
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { full_name: name, role: role === "admin" ? "admin" : "user" },
-            emailRedirectTo: window.location.origin + "/auth",
-          },
-        });
-        if (error) throw error;
-        toast.success("Account created. You're signed in.");
-        router.navigate({ to: "/dashboard", replace: true });
-      } else if (mode === "signin") {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-
-        if (role === "admin" && data.user) {
-          await verifyAdminAndRedirect(data.user.id);
-        } else {
-          router.navigate({ to: "/dashboard", replace: true });
-        }
-      } else {
-        const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: window.location.origin + "/reset-password",
-        });
-        if (error) throw error;
-        toast.success("Password reset email sent.");
-        setMode("signin");
-      }
-    } catch (e: any) {
-      toast.error(e?.message || "Something went wrong");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const isAdminMode = role === "admin";
+  const heading: Record<Mode, { title: string; subtitle: string }> = {
+    signin: { title: "Welcome back", subtitle: "Sign in to your meeting workspace" },
+    signup: { title: "Create your account", subtitle: "Start capturing every meeting" },
+    forgot: { title: "Reset your password", subtitle: "We'll email you a secure reset link" },
+    "check-email": { title: "Check your email", subtitle: "One more step to finish" },
+  };
 
   return (
-    <div
-      className={`flex min-h-screen items-center justify-center px-4 py-10 transition-colors duration-500 ${isAdminMode ? "bg-zinc-950" : ""}`}
-    >
+    <div className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-md">
         <Link to="/" className="mb-8 flex items-center justify-center gap-2">
-          <div
-            className={`grid h-10 w-10 place-items-center rounded-xl shadow-glow ${isAdminMode ? "bg-red-600" : "gradient-bg"}`}
-          >
-            {isAdminMode ? (
-              <ShieldCheck className="h-5 w-5 text-white" />
-            ) : (
-              <Sparkles className="h-5 w-5 text-primary-foreground" />
-            )}
+          <div className="gradient-bg grid h-10 w-10 place-items-center rounded-xl shadow-glow">
+            <Sparkles className="h-5 w-5 text-primary-foreground" />
           </div>
-          <span className={`text-xl font-bold ${isAdminMode ? "text-white" : ""}`}>
-            AI Powered Meeting Companion
-          </span>
+          <span className="text-xl font-bold tracking-tight">AI Meeting Companion</span>
         </Link>
 
-        {(mode === "signin" || mode === "signup") && (
-          <div className="mb-6 flex rounded-lg bg-black/10 p-1">
-            <button
-              onClick={() => setRole("student")}
-              className={`flex-1 rounded-md py-2 text-sm font-medium transition-all flex items-center justify-center gap-2 ${role === "student" ? "bg-background shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              <UserIcon className="h-4 w-4" /> Student {mode === "signin" ? "Login" : "Sign Up"}
-            </button>
-            <button
-              onClick={() => setRole("admin")}
-              className={`flex-1 rounded-md py-2 text-sm font-medium transition-all flex items-center justify-center gap-2 ${role === "admin" ? "bg-red-600 shadow text-white" : "text-muted-foreground hover:text-foreground"}`}
-            >
-              <ShieldCheck className="h-4 w-4" /> Admin {mode === "signin" ? "Login" : "Sign Up"}
-            </button>
-          </div>
-        )}
+        <div className="glass rounded-3xl p-6 shadow-soft sm:p-8">
+          <h1 className="text-2xl font-bold">{heading[mode].title}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{heading[mode].subtitle}</p>
 
-        <div
-          className={`glass rounded-3xl p-8 shadow-soft transition-all ${isAdminMode ? "border-red-900/30 bg-zinc-900/50 text-white shadow-2xl backdrop-blur-xl" : ""}`}
-        >
-          <h1 className="text-2xl font-bold">
-            {mode === "signin"
-              ? role === "admin"
-                ? "Admin Portal"
-                : "Welcome back"
-              : mode === "signup"
-                ? role === "admin"
-                  ? "Create Admin Account"
-                  : "Create Student Account"
-                : "Reset your password"}
-          </h1>
-          <p className={`mt-1 text-sm ${isAdminMode ? "text-zinc-400" : "text-muted-foreground"}`}>
-            {mode === "signin"
-              ? role === "admin"
-                ? "Restricted access. Authorized personnel only."
-                : "Sign in to your AI Powered Meeting Companion workspace"
-              : mode === "signup"
-                ? role === "admin"
-                  ? "Register a new administrator"
-                  : "Start automating your meetings"
-                : "We'll email you a reset link"}
-          </p>
-
-          <form onSubmit={submit} className="mt-6 space-y-4">
-            {mode === "signup" && (
-              <div>
-                <Label htmlFor="name" className={isAdminMode ? "text-zinc-400" : ""}>
-                  Full name
-                </Label>
-                <Input
-                  id="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  className={`mt-1 ${isAdminMode ? "border-white/10 bg-black/50 text-white focus:border-red-500" : "glass border-white/10"}`}
-                />
+          {(mode === "signin" || mode === "signup") && (
+            <>
+              <GoogleButton redirectTo={redirectTo} />
+              <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">
+                <div className="h-px flex-1 bg-border" /> or{" "}
+                <div className="h-px flex-1 bg-border" />
               </div>
-            )}
-            <div>
-              <Label htmlFor="email" className={isAdminMode ? "text-zinc-400" : ""}>
-                Email
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className={`mt-1 ${isAdminMode ? "border-white/10 bg-black/50 text-white focus:border-red-500" : "glass border-white/10"}`}
-              />
-            </div>
-            {mode !== "reset" && (
-              <div>
-                <Label htmlFor="password" className={isAdminMode ? "text-zinc-400" : ""}>
-                  Password
-                </Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={6}
-                  className={`mt-1 ${isAdminMode ? "border-white/10 bg-black/50 text-white focus:border-red-500" : "glass border-white/10"}`}
-                />
-              </div>
-            )}
+            </>
+          )}
 
-            <Button
-              type="submit"
-              disabled={loading}
-              className={`w-full rounded-full transition-all ${
-                isAdminMode
-                  ? "bg-red-600 hover:bg-red-700 text-white shadow-[0_0_15px_rgba(220,38,38,0.3)] font-bold tracking-wide mt-6"
-                  : "gradient-bg shadow-glow mt-6"
-              }`}
-            >
-              {loading
-                ? "Please wait…"
-                : mode === "signin"
-                  ? role === "admin"
-                    ? "Authorize"
-                    : "Sign in"
-                  : mode === "signup"
-                    ? role === "admin"
-                      ? "Create Admin"
-                      : "Create Account"
-                    : "Send reset link"}
-            </Button>
-          </form>
+          {mode === "signin" && <SignInForm onNeedsConfirmation={showCheckEmail} />}
+          {mode === "signup" && <SignUpForm onCheckEmail={showCheckEmail} />}
+          {mode === "forgot" && <ForgotForm onDone={() => setMode("signin")} />}
+          {mode === "check-email" && <CheckEmail email={pendingEmail} />}
 
-          <div className="mt-6 flex flex-wrap justify-between gap-2 text-xs">
+          <div className="mt-6 flex flex-wrap justify-between gap-2 text-sm">
             {mode === "signin" ? (
               <>
-                <button
-                  onClick={() => setMode("reset")}
-                  className={`${isAdminMode ? "text-zinc-500 hover:text-white" : "text-muted-foreground hover:text-foreground"}`}
+                <Button
+                  variant="link"
+                  className="h-auto p-0 text-muted-foreground"
+                  onClick={() => setMode("forgot")}
                 >
                   Forgot password?
-                </button>
-                <button
-                  onClick={() => {
-                    setMode("signup");
-                  }}
-                  className={`${isAdminMode ? "text-zinc-500 hover:text-white" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  Create account
-                </button>
+                </Button>
+                <Button variant="link" className="h-auto p-0" onClick={() => setMode("signup")}>
+                  Create an account
+                </Button>
               </>
             ) : (
-              <button
+              <Button
+                variant="link"
+                className="h-auto p-0 text-muted-foreground"
                 onClick={() => setMode("signin")}
-                className={`${isAdminMode ? "text-zinc-500 hover:text-white" : "text-muted-foreground hover:text-foreground"}`}
               >
-                ← Back to sign in
-              </button>
+                <ArrowLeft /> Back to sign in
+              </Button>
             )}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+/* --------------------------------------------------------------- forms */
+
+function SignInForm({ onNeedsConfirmation }: { onNeedsConfirmation: (email: string) => void }) {
+  const form = useForm<z.infer<typeof signInSchema>>({
+    resolver: zodResolver(signInSchema),
+    defaultValues: { email: "", password: "" },
+  });
+
+  async function onSubmit(values: z.infer<typeof signInSchema>) {
+    const { error } = await supabase.auth.signInWithPassword(values);
+    if (!error) return; // AuthPage redirects once the session arrives.
+    if (error.code === "email_not_confirmed") {
+      toast.info("Please confirm your email address first.");
+      onNeedsConfirmation(values.email);
+      return;
+    }
+    toast.error(authErrorMessage(error, "Incorrect email or password."));
+  }
+
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
+        <FormField
+          control={form.control}
+          name="email"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Email</FormLabel>
+              <FormControl>
+                <Input type="email" autoComplete="email" className="glass" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="password"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Password</FormLabel>
+              <FormControl>
+                <Input
+                  type="password"
+                  autoComplete="current-password"
+                  className="glass"
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <SubmitButton pending={form.formState.isSubmitting}>Sign in</SubmitButton>
+      </form>
+    </Form>
+  );
+}
+
+function SignUpForm({ onCheckEmail }: { onCheckEmail: (email: string) => void }) {
+  const form = useForm<z.infer<typeof signUpSchema>>({
+    resolver: zodResolver(signUpSchema),
+    defaultValues: { name: "", email: "", password: "", confirmPassword: "" },
+  });
+
+  async function onSubmit(values: z.infer<typeof signUpSchema>) {
+    const { data, error } = await supabase.auth.signUp({
+      email: values.email,
+      password: values.password,
+      options: { data: { full_name: values.name }, emailRedirectTo: emailRedirectUrl() },
+    });
+    if (error) {
+      toast.error(
+        authErrorMessage(
+          error,
+          "We couldn't create that account. If you already have one, sign in or reset your password.",
+        ),
+      );
+      return;
+    }
+    // With email confirmation enabled Supabase returns no session (and never reveals whether
+    // the address was already registered). Otherwise the user is signed in straight away.
+    if (!data.session) onCheckEmail(values.email);
+    else toast.success("Welcome! Your account is ready.");
+  }
+
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" noValidate>
+        <FormField
+          control={form.control}
+          name="name"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Full name</FormLabel>
+              <FormControl>
+                <Input autoComplete="name" className="glass" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="email"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Email</FormLabel>
+              <FormControl>
+                <Input type="email" autoComplete="email" className="glass" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="password"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Password</FormLabel>
+              <FormControl>
+                <Input type="password" autoComplete="new-password" className="glass" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="confirmPassword"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Confirm password</FormLabel>
+              <FormControl>
+                <Input type="password" autoComplete="new-password" className="glass" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <p className="text-xs text-muted-foreground">At least 8 characters.</p>
+        <SubmitButton pending={form.formState.isSubmitting}>Create account</SubmitButton>
+      </form>
+    </Form>
+  );
+}
+
+function ForgotForm({ onDone }: { onDone: () => void }) {
+  const form = useForm<z.infer<typeof forgotSchema>>({
+    resolver: zodResolver(forgotSchema),
+    defaultValues: { email: "" },
+  });
+
+  async function onSubmit({ email }: z.infer<typeof forgotSchema>) {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error && (error.status === 429 || error.code?.startsWith("over_"))) {
+      toast.error(authErrorMessage(error, ""));
+      return;
+    }
+    // Same message whether or not the address exists, to avoid account enumeration.
+    toast.success("If an account exists for that email, a reset link is on its way.");
+    onDone();
+  }
+
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="mt-6 space-y-4" noValidate>
+        <FormField
+          control={form.control}
+          name="email"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Email</FormLabel>
+              <FormControl>
+                <Input type="email" autoComplete="email" className="glass" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <SubmitButton pending={form.formState.isSubmitting}>Send reset link</SubmitButton>
+      </form>
+    </Form>
+  );
+}
+
+const RESEND_COOLDOWN_S = 60;
+
+function CheckEmail({ email }: { email: string }) {
+  const [cooldown, setCooldown] = useState(0);
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  async function resend() {
+    setSending(true);
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: { emailRedirectTo: emailRedirectUrl() },
+    });
+    setSending(false);
+    if (error && (error.status === 429 || error.code?.startsWith("over_"))) {
+      toast.error(authErrorMessage(error, ""));
+      return;
+    }
+    toast.success("If that address is waiting for confirmation, we've sent a new email.");
+    setCooldown(RESEND_COOLDOWN_S);
+  }
+
+  return (
+    <div className="mt-6 space-y-4 text-sm">
+      <div className="flex items-start gap-3 rounded-2xl bg-primary/10 p-4">
+        <MailCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+        <p>
+          We sent a confirmation link to <span className="font-semibold break-all">{email}</span>.
+          Open it to activate your account, then you'll be signed in automatically.
+        </p>
+      </div>
+      <p className="text-muted-foreground">
+        Can't find it? Check your spam folder, or request another email.
+      </p>
+      <Button
+        variant="glass"
+        className="w-full"
+        onClick={resend}
+        disabled={sending || cooldown > 0 || !email}
+      >
+        {sending && <Loader2 className="animate-spin" />}
+        {cooldown > 0 ? `Resend available in ${cooldown}s` : "Resend confirmation email"}
+      </Button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- buttons */
+
+function SubmitButton({ pending, children }: { pending: boolean; children: ReactNode }) {
+  return (
+    <Button type="submit" variant="brand" className="mt-2 w-full" disabled={pending}>
+      {pending && <Loader2 className="animate-spin" />}
+      {pending ? "Please wait…" : children}
+    </Button>
+  );
+}
+
+function GoogleButton({ redirectTo }: { redirectTo: string }) {
+  const [pending, setPending] = useState(false);
+
+  async function signIn() {
+    setPending(true);
+    rememberPostAuthRedirect(redirectTo);
+    try {
+      const result = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: window.location.origin,
+      });
+      if (result.error) {
+        console.error("[auth] Google sign-in failed", result.error);
+        toast.error("Google sign-in failed. Please try again.");
+      }
+      // Otherwise the browser is redirecting, or the session was set and AuthPage continues.
+    } catch (error) {
+      console.error("[auth] Google sign-in failed", error);
+      toast.error("Google sign-in failed. Please try again.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <Button variant="glass" className="mt-6 w-full" onClick={signIn} disabled={pending}>
+      {pending ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
+      Continue with Google
+    </Button>
+  );
+}
+
+/** Google "G" mark, drawn in the current text colour. */
+function GoogleIcon() {
+  return (
+    <svg viewBox="0 0 48 48" aria-hidden="true" fill="currentColor">
+      <path d="M43.6 20.5H42V20H24v8h11.3C33.7 32.4 29.3 35.5 24 35.5c-6.4 0-11.5-5.1-11.5-11.5S17.6 12.5 24 12.5c2.9 0 5.6 1.1 7.6 2.9l5.7-5.7C33.9 6.6 29.2 4.5 24 4.5 13.2 4.5 4.5 13.2 4.5 24S13.2 43.5 24 43.5 43.5 34.8 43.5 24c0-1.2-.1-2.4-.3-3.5z" />
+    </svg>
   );
 }
