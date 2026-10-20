@@ -68,11 +68,11 @@ type ScheduleValues = z.infer<typeof scheduleSchema>;
 export interface ScheduleMeetingDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Pre-filled date (e.g. the calendar day that was clicked). Defaults to today. */
+
   defaultDate?: Date | null;
-  /** Pre-selected project. */
+
   defaultProjectId?: string | null;
-  /** Email the signed-in user a confirmation through the `send-confirmation` function. */
+
   sendConfirmation?: boolean;
   title?: string;
   onCreated?: (meeting: MeetingListRow) => void;
@@ -80,7 +80,7 @@ export interface ScheduleMeetingDialogProps {
 
 function defaultsFor(date: Date | null | undefined, projectId: string | null | undefined) {
   const now = new Date();
-  // Default to the next full hour so the meeting is in the future.
+
   const nextHour = new Date(now.getTime() + 60 * 60 * 1000);
   return {
     title: "",
@@ -92,13 +92,12 @@ function defaultsFor(date: Date | null | undefined, projectId: string | null | u
   };
 }
 
-/** Dialog that creates an upcoming meeting (title, platform, link, date/time, project). */
 export function ScheduleMeetingDialog({
   open,
   onOpenChange,
   defaultDate,
   defaultProjectId,
-  sendConfirmation = false,
+  sendConfirmation = true,
   title = "Schedule a meeting",
   onCreated,
 }: ScheduleMeetingDialogProps) {
@@ -118,7 +117,6 @@ export function ScheduleMeetingDialog({
     defaultValues: defaultsFor(defaultDate, defaultProjectId),
   });
 
-  // Reset the form each time the dialog opens, using the latest default date.
   useEffect(() => {
     if (open) form.reset(defaultsFor(defaultDate, defaultProjectId));
   }, [open, defaultDate, defaultProjectId, form]);

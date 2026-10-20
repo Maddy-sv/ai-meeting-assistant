@@ -42,10 +42,6 @@ import {
   type DecisionRow,
 } from "@/server/meetings";
 
-// ---------------------------------------------------------------------------
-// Shared schemas for AI output
-// ---------------------------------------------------------------------------
-
 const str = (max: number) => z.string().trim().max(max);
 const nullableStr = (max: number) =>
   z
@@ -117,10 +113,6 @@ type SummaryPayload = {
   action_items: { title: string; assignee: string | null; deadline: string | null }[];
   decisions: { description: string; made_by: string | null }[];
 };
-
-// ---------------------------------------------------------------------------
-// summarizeMeeting
-// ---------------------------------------------------------------------------
 
 const SummarizeInput = z.object({
   meetingId: uuid,
@@ -200,7 +192,7 @@ export const summarizeMeeting = createServerFn({ method: "POST" })
       body: parsed.executive_summary.slice(0, 280),
       link: `/meetings/${meeting.id}`,
     });
-    // The summary itself is saved; a missing notification is logged, not fatal.
+
     if (notifErr) console.error("[db] summary notification:", notifErr.message);
 
     return {
@@ -216,10 +208,6 @@ export const summarizeMeeting = createServerFn({ method: "POST" })
       decisions: parsed.decisions.map((d) => ({ description: d.description, made_by: d.made_by })),
     };
   });
-
-// ---------------------------------------------------------------------------
-// syncMeetingActionItems
-// ---------------------------------------------------------------------------
 
 const MeetingIdInput = z.object({ meetingId: uuid });
 
@@ -296,10 +284,6 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
     },
   );
 
-// ---------------------------------------------------------------------------
-// generateMeetingRecaps (no AI call: composes recap emails from saved data)
-// ---------------------------------------------------------------------------
-
 function assigneeNames(assignee: string | null): string[] {
   return (assignee ?? "")
     .split(/,|&|\band\b/i)
@@ -359,10 +343,6 @@ export const generateMeetingRecaps = createServerFn({ method: "POST" })
       };
     });
   });
-
-// ---------------------------------------------------------------------------
-// generateProjectSummary
-// ---------------------------------------------------------------------------
 
 const ProjectInput = z.object({ projectId: uuid });
 
@@ -434,33 +414,39 @@ export const generateProjectSummary = createServerFn({ method: "POST" })
       conflicts: verified.conflicts,
     };
 
-    const res = await generateForUser(supabase, userId, "generateProjectSummary", {
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: projectPrompt({
-                verifiedReport: verified.progress_report,
-                pending:
-                  verified.verified_pending
-                    .map(
-                      (t) =>
-                        `- [${t.status}] ${t.title} (${t.assignee ?? "unassigned"}, due ${t.deadline ?? "not set"})`,
-                    )
-                    .join("\n") || "None",
-              }),
-            },
-          ],
+    let res: Awaited<ReturnType<typeof generateForUser>>;
+    try {
+      res = await generateForUser(supabase, userId, "generateProjectSummary", {
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: projectPrompt({
+                  verifiedReport: verified.progress_report,
+                  pending:
+                    verified.verified_pending
+                      .map(
+                        (t) =>
+                          `- [${t.status}] ${t.title} (${t.assignee ?? "unassigned"}, due ${t.deadline ?? "not set"})`,
+                      )
+                      .join("\n") || "None",
+                }),
+              },
+            ],
+          },
+        ],
+        config: {
+          systemInstruction: PROJECT_SYSTEM,
+          responseMimeType: "application/json",
+          responseSchema: PROJECT_SCHEMA,
+          temperature: 0.2,
         },
-      ],
-      config: {
-        systemInstruction: PROJECT_SYSTEM,
-        responseMimeType: "application/json",
-        responseSchema: PROJECT_SCHEMA,
-        temperature: 0.2,
-      },
-    });
+      });
+    } catch (err) {
+      console.warn("[ai] project summary fell back to the verified report:", err);
+      return { ...base, ai_enhanced: false };
+    }
     const parsed = parseAi(
       z.object({
         progress_report: z.string().trim(),
@@ -468,9 +454,7 @@ export const generateProjectSummary = createServerFn({ method: "POST" })
       }),
       res.text,
     );
-    if (!parsed.progress_report) {
-      throw new Error("The AI returned an empty project summary. Please try again.");
-    }
+    if (!parsed.progress_report) return { ...base, ai_enhanced: false };
 
     return {
       ...base,
@@ -481,10 +465,6 @@ export const generateProjectSummary = createServerFn({ method: "POST" })
       ai_enhanced: true,
     };
   });
-
-// ---------------------------------------------------------------------------
-// askChatBot
-// ---------------------------------------------------------------------------
 
 const ChatInput = z.object({ message: str(4000).min(1, "Message is empty") });
 const CHAT_HISTORY_LIMIT = 20;
@@ -599,10 +579,6 @@ export const askChatBot = createServerFn({ method: "POST" })
     return { reply };
   });
 
-// ---------------------------------------------------------------------------
-// transcribeRemoteAudio
-// ---------------------------------------------------------------------------
-
 const AUDIO_TYPES = [
   "audio/webm",
   "audio/ogg",
@@ -619,7 +595,7 @@ const TranscribeInput = z.object({
   segmentIndex: z.number().int().min(0).max(1_000_000),
   screenshotBase64: base64Field(MAX_SCREENSHOT_BYTES, "Screenshot").optional(),
   knownParticipants: z.array(str(100)).max(50).optional(),
-  /** Ignored: the host name always comes from the caller's profile. */
+
   hostName: z.string().max(200).optional(),
 });
 
@@ -671,7 +647,6 @@ export const transcribeRemoteAudio = createServerFn({ method: "POST" })
       .filter((s) => s.content.length > 1);
     if (segments.length === 0) return null;
 
-    // Register newly identified named speakers as participants.
     const known = new Set(existingNames.map((n) => n.toLowerCase()));
     const newNames: string[] = [];
     for (const s of segments) {
@@ -702,10 +677,6 @@ export const transcribeRemoteAudio = createServerFn({ method: "POST" })
       status: "partial" as const,
     }));
   });
-
-// ---------------------------------------------------------------------------
-// cleanAndAlignTranscripts
-// ---------------------------------------------------------------------------
 
 const CleanInput = z.object({
   meetingId: uuid,
@@ -767,7 +738,6 @@ export const cleanAndAlignTranscripts = createServerFn({ method: "POST" })
       );
     }
 
-    // Keep the original timing: map each cleaned line onto the old timeline.
     const old = oldSegs ?? [];
     const now = new Date().toISOString();
     const toInsert = cleaned.map((c, i) => ({
@@ -778,7 +748,6 @@ export const cleanAndAlignTranscripts = createServerFn({ method: "POST" })
       spoken_at: old.length ? old[Math.floor((i * old.length) / cleaned.length)].spoken_at : now,
     }));
 
-    // Insert the new transcript first, then remove the old rows by id.
     const { data: inserted, error: insErr } = await supabase
       .from("transcripts")
       .insert(toInsert)
@@ -811,10 +780,6 @@ export const cleanAndAlignTranscripts = createServerFn({ method: "POST" })
 
     return { success: true as const, transcripts: inserted ?? [] };
   });
-
-// ---------------------------------------------------------------------------
-// Action item CRUD
-// ---------------------------------------------------------------------------
 
 const statusSchema = z.preprocess(
   (v) => (v === "completed" ? "done" : v),
@@ -861,7 +826,6 @@ export type TodoTask = ActionItemRow & { meeting_title: string | null; is_host: 
 
 const NoInput = z.union([z.undefined(), z.null(), z.object({}).strict()]);
 
-/** Tasks from the caller's own meetings plus tasks assigned to the caller. */
 export const fetchUserTodoTasks = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input?: z.input<typeof NoInput>) => parseInput(NoInput, input))
@@ -875,7 +839,6 @@ export const fetchUserTodoTasks = createServerFn({ method: "POST" })
     if (mErr) fail("load meetings", mErr, "Could not load your meetings.");
     const titles = new Map((meetings ?? []).map((m) => [m.id, m.title]));
 
-    // Filter by host through a join, so the request does not grow with the number of meetings.
     const [own, assigned] = await Promise.all([
       supabase
         .from("action_items")
@@ -899,7 +862,6 @@ export const fetchUserTodoTasks = createServerFn({ method: "POST" })
   });
 
 const CreateActionInput = z.object({
-  /** Ignored: the database generates the id. */
   id: z.string().max(100).optional(),
   title: str(500).min(1, "Title is required"),
   assignee: str(200).nullish(),
