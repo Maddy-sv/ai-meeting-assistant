@@ -220,13 +220,13 @@ BEGIN
   END IF;
 
   IF NEW.subscription_plan IS DISTINCT FROM OLD.subscription_plan THEN
-    RAISE EXCEPTION 'You cannot change your subscription plan' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'You cannot change your subscription plan.';
   END IF;
   IF NEW.is_active IS DISTINCT FROM OLD.is_active THEN
-    RAISE EXCEPTION 'You cannot change your account status' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'You cannot change your account status.';
   END IF;
   IF NEW.email IS DISTINCT FROM OLD.email THEN
-    RAISE EXCEPTION 'Email is managed by your login account' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Email is managed by your login account.';
   END IF;
   RETURN NEW;
 END;
@@ -261,7 +261,7 @@ BEGIN
     SELECT 1 FROM public.projects p
     WHERE p.id = NEW.project_id AND p.owner_id = NEW.host_id
   ) THEN
-    RAISE EXCEPTION 'Project not found' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Project not found.';
   END IF;
   RETURN NEW;
 END;
@@ -349,7 +349,7 @@ BEGIN
      OR NEW.deadline IS DISTINCT FROM OLD.deadline
      OR NEW.canonical_key IS DISTINCT FROM OLD.canonical_key
      OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
-    RAISE EXCEPTION 'Assignees can only change the task status' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Assignees can only change the task status.';
   END IF;
   RETURN NEW;
 END;
@@ -554,7 +554,7 @@ DECLARE
   v_today timestamptz := date_trunc('day', now());
 BEGIN
   IF NOT public.is_admin() THEN
-    RAISE EXCEPTION 'Admin access required' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Only admins can do this.';
   END IF;
 
   RETURN json_build_object(
@@ -591,7 +591,7 @@ SET search_path = public
 AS $$
 BEGIN
   IF NOT public.is_admin() THEN
-    RAISE EXCEPTION 'Admin access required' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Only admins can do this.';
   END IF;
 
   RETURN QUERY
@@ -630,7 +630,7 @@ SET search_path = public
 AS $$
 BEGIN
   IF NOT public.is_admin() THEN
-    RAISE EXCEPTION 'Admin access required' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Only admins can do this.';
   END IF;
 
   RETURN QUERY
@@ -660,13 +660,13 @@ SET search_path = public
 AS $$
 BEGIN
   IF NOT public.is_admin() THEN
-    RAISE EXCEPTION 'Admin access required' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Only admins can do this.';
   END IF;
   IF target IS NULL OR NOT EXISTS (SELECT 1 FROM auth.users WHERE id = target) THEN
-    RAISE EXCEPTION 'User not found' USING ERRCODE = 'P0002';
+    RAISE EXCEPTION 'User not found.';
   END IF;
   IF target = auth.uid() AND NOT make_admin THEN
-    RAISE EXCEPTION 'You cannot remove your own admin role' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'You cannot remove your own admin role.';
   END IF;
 
   IF make_admin THEN
@@ -686,15 +686,15 @@ SET search_path = public
 AS $$
 BEGIN
   IF NOT public.is_admin() THEN
-    RAISE EXCEPTION 'Admin access required' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Only admins can do this.';
   END IF;
   IF target = auth.uid() AND NOT active THEN
-    RAISE EXCEPTION 'You cannot disable your own account' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'You cannot disable your own account.';
   END IF;
 
   UPDATE public.profiles SET is_active = active WHERE id = target;
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'User not found' USING ERRCODE = 'P0002';
+    RAISE EXCEPTION 'User not found.';
   END IF;
 END;
 $$;
@@ -711,7 +711,7 @@ DECLARE
   v_since timestamptz := date_trunc('day', now()) - interval '13 days';
 BEGIN
   IF NOT public.is_admin() THEN
-    RAISE EXCEPTION 'Admin access required' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Only admins can do this.';
   END IF;
 
   RETURN json_build_object(
@@ -874,7 +874,7 @@ DECLARE
   i integer;
 BEGIN
   IF v_uid IS NULL THEN
-    RAISE EXCEPTION 'Sign in to load demo data' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Please sign in to load demo data.';
   END IF;
 
   SELECT id INTO v_project
@@ -1035,3 +1035,26 @@ $$;
 
 REVOKE EXECUTE ON FUNCTION public.seed_demo_workspace() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.seed_demo_workspace() TO authenticated;
+
+-- -----------------------------------------------------------------------------
+-- 13. Realtime: publish notifications, action_items and chat_messages changes
+--     (RLS still applies to what each subscriber receives).
+-- -----------------------------------------------------------------------------
+DO $$
+DECLARE
+  t text;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    RAISE NOTICE 'Publication supabase_realtime not found; skipping realtime setup.';
+    RETURN;
+  END IF;
+  FOREACH t IN ARRAY ARRAY['notifications', 'action_items', 'chat_messages'] LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+    END IF;
+  END LOOP;
+END;
+$$;
