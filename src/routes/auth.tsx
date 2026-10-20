@@ -17,7 +17,6 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { supabase } from "@/integrations/supabase/client";
-import { lovable } from "@/integrations/lovable";
 import { rememberPostAuthRedirect, safeRedirect, useSession } from "@/lib/auth";
 
 type Mode = "signin" | "signup" | "forgot" | "check-email";
@@ -437,14 +436,15 @@ function GoogleButton({ redirectTo }: { redirectTo: string }) {
     setPending(true);
     rememberPostAuthRedirect(redirectTo);
     try {
-      const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin,
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: `${window.location.origin}/auth` },
       });
-      if (result.error) {
-        console.error("[auth] Google sign-in failed", result.error);
+      if (error) {
+        console.error("[auth] Google sign-in failed", error);
         toast.error("Google sign-in failed. Please try again.");
       }
-      // Otherwise the browser is redirecting, or the session was set and AuthPage continues.
+      // Otherwise the browser is redirecting; AuthProvider finishes the sign-in on return.
     } catch (error) {
       console.error("[auth] Google sign-in failed", error);
       toast.error("Google sign-in failed. Please try again.");
