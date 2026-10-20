@@ -141,9 +141,13 @@ export const EXTRACTION_SCHEMA: Schema = {
   required: ["action_items", "decisions"],
 };
 
-export const CLEAN_SYSTEM = `You clean up speech-to-text meeting transcripts and return strict JSON only.
-Fix obvious recognition mistakes using the surrounding context, and attribute each turn to the right speaker from the known participants.
-Do not add, remove or invent content or topics.
+export const CLEAN_SYSTEM = `You are an expert meeting transcript clean-up and speaker diarization assistant. Return strict JSON only.
+1. Fix speech-to-text phonetic mistakes and typos from the conversation context (for example "police dashboard" means "finish the dashboard", "by Pride" means "by Friday").
+2. Separate the conversation into turns and attribute each turn to the person who actually said it. Live recordings often label every line with the organiser's name even when another person is speaking, so do not trust the incoming speaker labels.
+   - A line that addresses the organiser by name, asks the organiser a question, answers the organiser, or describes the speaker's own situation that differs from the organiser's is said by someone else.
+   - Use the known participants' names for other speakers. If the only known participant is the organiser, label the other voice exactly "Remote Participant".
+   - Keep consecutive sentences from the same person in one turn; split a line when the speaker changes inside it.
+3. Keep the wording natural and faithful. Do not add, remove or invent content or topics.
 ${UNTRUSTED_NOTE}`;
 
 export function cleanPrompt(p: {
@@ -152,9 +156,10 @@ export function cleanPrompt(p: {
   participants: string[];
   transcript: string;
 }): string {
+  const others = p.participants.filter((n) => n.toLowerCase() !== p.hostName.toLowerCase());
   return `Meeting title: ${p.title}
-Organiser: ${p.hostName}
-Known participants: ${p.participants.join(", ") || "not recorded"}
+Organiser (the user): ${p.hostName}
+Other known participants: ${others.join(", ") || 'none recorded, use "Remote Participant"'}
 
 ${asData("transcript", p.transcript)}
 

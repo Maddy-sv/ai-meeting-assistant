@@ -1194,10 +1194,16 @@ export const cleanAndAlignTranscripts = createServerFn({ method: "POST" })
     }
 
     const knownNames = new Set(participants.map((n) => n.toLowerCase()));
+    const hasNamedRemote = participants.some(
+      (n) =>
+        n.toLowerCase() !== hostName.toLowerCase() && !PLACEHOLDER_SPEAKERS.has(n.toLowerCase()),
+    );
     const addedSpeakers: string[] = [];
     for (const c of cleaned) {
       const key = c.speaker.toLowerCase();
-      if (knownNames.has(key) || PLACEHOLDER_SPEAKERS.has(key) || SELF_SPEAKERS.has(key)) continue;
+      if (knownNames.has(key) || SELF_SPEAKERS.has(key)) continue;
+      if (PLACEHOLDER_SPEAKERS.has(key) && (key !== "remote participant" || hasNamedRemote))
+        continue;
       knownNames.add(key);
       addedSpeakers.push(c.speaker);
     }
@@ -1206,7 +1212,12 @@ export const cleanAndAlignTranscripts = createServerFn({ method: "POST" })
         addedSpeakers.map((name) => ({
           meeting_id: meeting.id,
           name,
-          role: name.toLowerCase() === hostName.toLowerCase() ? "host" : "participant",
+          role:
+            name.toLowerCase() === hostName.toLowerCase()
+              ? "host"
+              : PLACEHOLDER_SPEAKERS.has(name.toLowerCase())
+                ? "remote"
+                : "participant",
         })),
       );
       if (pErr) console.error("[db] add transcript speakers:", pErr.message);
