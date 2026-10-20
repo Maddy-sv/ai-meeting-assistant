@@ -34,7 +34,7 @@ const BriefingInput = z.object({ meetingId: uuid });
  */
 export const getMeetingBriefing = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: z.input<typeof BriefingInput>) => parseInput(BriefingInput, input))
+  .validator((input: z.input<typeof BriefingInput>) => parseInput(BriefingInput, input))
   .handler(async ({ data, context }): Promise<MeetingBriefing> => {
     const { supabase, userId } = context;
     const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);

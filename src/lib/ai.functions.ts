@@ -132,7 +132,7 @@ const SummarizeInput = z.object({
 
 export const summarizeMeeting = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: z.input<typeof SummarizeInput>) => parseInput(SummarizeInput, input))
+  .validator((input: z.input<typeof SummarizeInput>) => parseInput(SummarizeInput, input))
   .handler(async ({ data, context }): Promise<SummaryPayload> => {
     const { supabase, userId } = context;
     const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
@@ -225,7 +225,7 @@ const MeetingIdInput = z.object({ meetingId: uuid });
 
 export const syncMeetingActionItems = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: z.input<typeof MeetingIdInput>) => parseInput(MeetingIdInput, input))
+  .validator((input: z.input<typeof MeetingIdInput>) => parseInput(MeetingIdInput, input))
   .handler(
     async ({
       data,
@@ -309,7 +309,7 @@ function assigneeNames(assignee: string | null): string[] {
 
 export const generateMeetingRecaps = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: z.input<typeof MeetingIdInput>) => parseInput(MeetingIdInput, input))
+  .validator((input: z.input<typeof MeetingIdInput>) => parseInput(MeetingIdInput, input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
@@ -368,7 +368,7 @@ const ProjectInput = z.object({ projectId: uuid });
 
 export const generateProjectSummary = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: z.input<typeof ProjectInput>) => parseInput(ProjectInput, input))
+  .validator((input: z.input<typeof ProjectInput>) => parseInput(ProjectInput, input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
 
@@ -491,7 +491,7 @@ const CHAT_HISTORY_LIMIT = 20;
 
 export const askChatBot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: z.input<typeof ChatInput>) => parseInput(ChatInput, input))
+  .validator((input: z.input<typeof ChatInput>) => parseInput(ChatInput, input))
   .handler(async ({ data, context }): Promise<{ reply: string }> => {
     const { supabase, userId } = context;
 
@@ -627,7 +627,7 @@ const PLACEHOLDER_SPEAKERS = new Set(["remote", "remote participant", "unknown",
 
 export const transcribeRemoteAudio = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: z.input<typeof TranscribeInput>) => parseInput(TranscribeInput, input))
+  .validator((input: z.input<typeof TranscribeInput>) => parseInput(TranscribeInput, input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
@@ -714,7 +714,7 @@ const CleanInput = z.object({
 
 export const cleanAndAlignTranscripts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: z.input<typeof CleanInput>) => parseInput(CleanInput, input))
+  .validator((input: z.input<typeof CleanInput>) => parseInput(CleanInput, input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
@@ -825,7 +825,7 @@ const UpdateStatusInput = z.object({ actionId: uuid, status: statusSchema });
 
 export const updateActionItemStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: z.input<typeof UpdateStatusInput>) =>
+  .validator((input: z.input<typeof UpdateStatusInput>) =>
     parseInput(UpdateStatusInput, input),
   )
   .handler(async ({ data, context }) => {
@@ -845,7 +845,7 @@ const ActionIdInput = z.object({ actionId: uuid });
 
 export const deleteActionItemServer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: z.input<typeof ActionIdInput>) => parseInput(ActionIdInput, input))
+  .validator((input: z.input<typeof ActionIdInput>) => parseInput(ActionIdInput, input))
   .handler(async ({ data, context }) => {
     const { data: rows, error } = await context.supabase
       .from("action_items")
@@ -866,7 +866,7 @@ const NoInput = z.union([z.undefined(), z.null(), z.object({}).strict()]);
 /** Tasks from the caller's own meetings plus tasks assigned to the caller. */
 export const fetchUserTodoTasks = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input?: z.input<typeof NoInput>) => parseInput(NoInput, input))
+  .validator((input?: z.input<typeof NoInput>) => parseInput(NoInput, input))
   .handler(async ({ context }): Promise<TodoTask[]> => {
     const { supabase, userId } = context;
 
@@ -910,7 +910,7 @@ const CreateActionInput = z.object({
 
 export const createActionItemServer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: z.input<typeof CreateActionInput>) =>
+  .validator((input: z.input<typeof CreateActionInput>) =>
     parseInput(CreateActionInput, input),
   )
   .handler(async ({ data, context }) => {

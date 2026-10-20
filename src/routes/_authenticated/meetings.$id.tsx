@@ -28,7 +28,11 @@ export const Route = createFileRoute("/_authenticated/meetings/$id")({
   errorComponent: ({ error, reset }) => (
     <MeetingProblem
       title="Unable to load meeting"
-      message={error?.message || "An unexpected error occurred while loading this meeting."}
+      message={
+        error instanceof Error && error.message
+          ? error.message
+          : "An unexpected error occurred while loading this meeting."
+      }
       onRetry={reset}
     />
   ),
