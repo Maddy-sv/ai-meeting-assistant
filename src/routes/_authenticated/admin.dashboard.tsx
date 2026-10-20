@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { format, isToday } from "date-fns";
 import {
   ArrowRight,
+  CalendarDays,
   CheckCircle2,
   FileText,
   ListChecks,
@@ -41,19 +42,22 @@ function AdminDashboard() {
   const recentMeetings = [...(meetings.data ?? [])]
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
     .slice(0, 5);
+  const meetingsToday = (meetings.data ?? []).filter((m) =>
+    isToday(new Date(m.scheduled_at ?? m.created_at)),
+  ).length;
 
   return (
     <div className="space-y-8">
       <PageHeader
         eyebrow="Administration"
-        title="Admin overview"
+        title="Admin Control Center"
         description="Live totals across every workspace."
       />
 
       {overview.isError ? (
         <ErrorState message={overview.error.message} onRetry={() => overview.refetch()} />
       ) : (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
           <StatTile
             label="Users"
             icon={Users}
@@ -67,6 +71,12 @@ function AdminDashboard() {
             loading={overview.isLoading}
             value={o?.meetings ?? 0}
             hint={o ? `${o.meetings_completed} completed` : undefined}
+          />
+          <StatTile
+            label="Meetings today"
+            icon={CalendarDays}
+            loading={meetings.isLoading}
+            value={meetings.isError ? "—" : meetingsToday}
           />
           <StatTile
             label="Transcripts"
