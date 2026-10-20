@@ -352,3 +352,19 @@ export const dataKeys = {
   chat: (userId: string) => ["chat-messages", userId] as const,
   search: (q: string) => ["search", q] as const,
 };
+
+/* ----------------------------------------------------------------- chat */
+
+type AskChatBotFn = (opts: { data: { message: string } }) => Promise<{ reply: string }>;
+
+/**
+ * Sends one chat message; the server loads the history, answers and saves both messages.
+ * The server function is imported lazily so it is not part of the app-shell bundle.
+ * TEMPORARY CAST: `askChatBot` changes to `{ message } -> { reply }` in the backend revamp.
+ */
+export async function askChat(message: string): Promise<string> {
+  const { askChatBot } = await import("@/lib/ai.functions");
+  const result = await (askChatBot as unknown as AskChatBotFn)({ data: { message } });
+  if (!result?.reply) throw new Error("The assistant did not reply. Please try again.");
+  return result.reply;
+}
