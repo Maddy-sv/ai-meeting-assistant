@@ -19,13 +19,7 @@ import {
   deleteActionItemServer,
   createActionItemServer,
 } from "@/lib/ai.functions";
-import {
-  STABLE_TASK_IDS,
-  deduplicateDecisions,
-  getStableTaskId,
-  safeFormatDeadline,
-  resolveDeadlineToISODate,
-} from "@/lib/continuous-memory";
+import { safeFormatDeadline } from "@/lib/continuous-memory";
 import {
   ArrowLeft,
   Download,
@@ -103,24 +97,6 @@ function safeFormatDateTime(val?: string | null): string {
   } catch {
     return "";
   }
-}
-
-function getSavedStatusMap(): Record<string, string> {
-  try {
-    const raw = typeof window !== "undefined" ? localStorage.getItem("ai_task_status_map") : null;
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return {};
-}
-
-function saveStatusToStorage(taskId: string, title: string, status: string) {
-  try {
-    if (typeof window === "undefined") return;
-    const map = getSavedStatusMap();
-    if (taskId) map[taskId] = status;
-    if (title) map[title.toLowerCase().trim()] = status;
-    localStorage.setItem("ai_task_status_map", JSON.stringify(map));
-  } catch {}
 }
 
 function safeFormatDate(val?: string | null, refDate?: string | Date | null): string {
@@ -244,7 +220,7 @@ function generateCompleteMeetingEmail(
 
 function openInGmail(to: string, subject: string, body: string) {
   const url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  window.open(url, "_blank");
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function openInMailto(to: string, subject: string, body: string) {
@@ -819,757 +795,12 @@ function MeetingDetail() {
 
       const meetingData = mm.data as Meeting | null;
 
-      // Clean up any "Matthew Smith" in transcripts to "Remote Participant"
-      let transcriptList = ((tt.data as Transcript[]) ?? []).map((t) => {
-        if (t.speaker === "Matthew Smith") {
-          supabase
-            .from("transcripts")
-            .update({ speaker: "Remote Participant" })
-            .eq("id", t.id)
-            .then(() => {});
-          return { ...t, speaker: "Remote Participant" };
-        }
-        return t;
-      });
-
-      // Auto-recover dialogue if transcripts were lost during previous DB error
-      if (transcriptList.length === 0 && meetingData?.status === "completed") {
-        const recoveredDialogue = [
-          {
-            speaker: "Remote Participant",
-            content:
-              "Hi, good morning. Thanks for joining the meeting. Today, I'd like to discuss the progress of our project and finalize the next steps.",
-          },
-          { speaker: "Sumeet Made", content: "Good morning. Sure, let's get started." },
-          {
-            speaker: "Remote Participant",
-            content:
-              "The frontend development is almost complete. We still need to finish the dashboard and improve the user interface.",
-          },
-          {
-            speaker: "Sumeet Made",
-            content:
-              "I agree. I think we should prioritize the dashboard first and then work on the UI improvements.",
-          },
-          {
-            speaker: "Remote Participant",
-            content:
-              "Agreed. So, we've decided to complete the dashboard by Wednesday and finish the UI improvements by Friday.",
-          },
-          {
-            speaker: "Sumeet Made",
-            content: "Okay. I'll take responsibility for completing the dashboard by Wednesday.",
-          },
-          {
-            speaker: "Remote Participant",
-            content: "Great. I'll handle the UI improvements and testing by Friday.",
-          },
-          {
-            speaker: "Sumeet Made",
-            content: "I'll also share the completed dashboard with you for review once it's ready.",
-          },
-          {
-            speaker: "Remote Participant",
-            content:
-              "Perfect. Let's quickly recap. We decided to prioritize the dashboard, you'll complete it by Wednesday, and I'll complete the UI improvements and testing by Friday.",
-          },
-          {
-            speaker: "Sumeet Made",
-            content:
-              "That's correct. We'll review everything together after the tasks are completed.",
-          },
-          {
-            speaker: "Remote Participant",
-            content: "Great. Thanks for your time and for taking care of the tasks.",
-          },
-          { speaker: "Sumeet Made", content: "Thank you. Have a great day." },
-          { speaker: "Remote Participant", content: "You too. Bye." },
-        ];
-
-        const toInsert = recoveredDialogue.map((d, i) => ({
-          id: crypto.randomUUID(),
-          meeting_id: id,
-          speaker: d.speaker,
-          content: d.content,
-          segment_index: i,
-          spoken_at: new Date(Date.now() - (recoveredDialogue.length - i) * 15000).toISOString(),
-        }));
-
-        try {
-          await supabase.from("transcripts").insert(toInsert);
-        } catch (e) {
-          console.warn("Recovered dialogue insert note:", e);
-        }
-        transcriptList.push(...(toInsert as any));
-      }
-
-      // Deduplicate participants and clean up "Matthew Smith" -> "Remote Participant"
-      const uniqueMap = new Map<string, Participant>();
-      const duplicateIds: string[] = [];
-
-      for (const p of (pp.data as Participant[]) ?? []) {
-        let name = (p.name || "").trim();
-        let role = p.role || "remote";
-        if (name.toLowerCase() === "matthew smith") {
-          name = "Remote Participant";
-          role = "remote";
-          supabase
-            .from("participants")
-            .update({ name: "Remote Participant", role: "remote" })
-            .eq("id", p.id)
-            .then(() => {});
-        }
-        const key = name.toLowerCase();
-        if (!uniqueMap.has(key)) {
-          uniqueMap.set(key, { ...p, name, role });
-        } else {
-          duplicateIds.push(p.id);
-        }
-      }
-
-      if (duplicateIds.length > 0) {
-        supabase
-          .from("participants")
-          .delete()
-          .in("id", duplicateIds)
-          .then(() => {});
-      }
-
-      let participantList = Array.from(uniqueMap.values());
-
-      // Auto-discover any missing speaker from transcripts
-      try {
-        const knownNames = new Set(participantList.map((p) => (p.name || "").trim().toLowerCase()));
-        const missing: { name: string; role: string }[] = [];
-
-        for (const t of transcriptList) {
-          const spk = (t.speaker || "").trim();
-          if (spk && !knownNames.has(spk.toLowerCase())) {
-            knownNames.add(spk.toLowerCase());
-            const isHost =
-              spk.toLowerCase() === "you" ||
-              spk.toLowerCase() === "host" ||
-              spk.toLowerCase() === speakerRef.current.toLowerCase();
-            missing.push({
-              name: spk,
-              role: isHost ? "host" : "remote",
-            });
-          }
-        }
-
-        if (missing.length > 0 && meetingData) {
-          const toInsert = missing.map((m) => ({
-            id: crypto.randomUUID(),
-            meeting_id: id,
-            name: m.name,
-            role: m.role,
-          }));
-          const { data: inserted } = await supabase.from("participants").insert(toInsert).select();
-          if (inserted) {
-            participantList = [...participantList, ...(inserted as Participant[])];
-          }
-        }
-      } catch (err) {
-        console.warn("Auto participant sync error:", err);
-      }
-
-      let initialActions = (aa.data as Action[]) ?? [];
-      let summaryData = ss.data ? (ss.data as any) : null;
-      const summaryText = summaryData?.executive_summary || "";
-      let decisionsData = (dd.data as Decision[]) ?? [];
-      const titleLower = (meetingData?.title || "").toLowerCase();
-      const isCollegeEvent =
-        titleLower.includes("7") ||
-        titleLower.includes("college") ||
-        titleLower.includes("event") ||
-        summaryText.toLowerCase().includes("registration");
-
-      // Meeting detection for cross-meeting memory & consistency
-      const isMeeting2 =
-        titleLower.includes("new2") ||
-        titleLower.includes("meeting 2") ||
-        titleLower.includes("new 2") ||
-        titleLower === "2" ||
-        summaryText.toLowerCase().includes("shreyash");
-      const isMeeting1 =
-        (titleLower.includes("new1") ||
-          titleLower.includes("meeting 1") ||
-          titleLower.includes("new 1") ||
-          titleLower === "1") &&
-        !isMeeting2;
-
-      // Issue 5: Participant identity - In Meeting 2, name the remote participant "Shreyash" instead of generic "Remote Participant"
-      if (isMeeting2) {
-        let hasShreyash = false;
-        participantList = participantList.map((p) => {
-          const pName = (p.name || "").trim().toLowerCase();
-          if (pName === "remote participant" || pName === "matthew smith" || pName === "remote") {
-            hasShreyash = true;
-            supabase
-              .from("participants")
-              .update({ name: "Shreyash", role: "remote" })
-              .eq("id", p.id)
-              .then(() => {});
-            return { ...p, name: "Shreyash", role: "remote" };
-          }
-          if (pName === "shreyash") hasShreyash = true;
-          return p;
-        });
-
-        if (!hasShreyash && meetingData) {
-          const shreyashParticipant: Participant = {
-            id: crypto.randomUUID(),
-            meeting_id: id,
-            name: "Shreyash",
-            role: "remote",
-            created_at: new Date().toISOString(),
-          };
-          participantList.push(shreyashParticipant);
-          supabase
-            .from("participants")
-            .insert({
-              id: shreyashParticipant.id,
-              meeting_id: id,
-              name: "Shreyash",
-              role: "remote",
-            })
-            .then(() => {});
-        }
-
-        // Align transcript speaker to "Shreyash"
-        transcriptList = transcriptList.map((t) => {
-          if (t.speaker === "Remote Participant" || t.speaker === "Matthew Smith") {
-            supabase
-              .from("transcripts")
-              .update({ speaker: "Shreyash" })
-              .eq("id", t.id)
-              .then(() => {});
-            return { ...t, speaker: "Shreyash" };
-          }
-          return t;
-        });
-      }
-
-      // 1. Sync actions strictly assigned to THIS meeting (meeting_id === id)
-      try {
-        const rawCached =
-          typeof window !== "undefined" ? localStorage.getItem("ai_meeting_todo_cache") : null;
-        if (rawCached) {
-          const cachedTasks = JSON.parse(rawCached);
-          if (Array.isArray(cachedTasks) && cachedTasks.length > 0) {
-            // Find tasks strictly associated with this meeting ID
-            const meetingCached = cachedTasks.filter((t: any) => t.meeting_id === id);
-            if (meetingCached.length > 0) {
-              const existingKeys = new Set(
-                initialActions.map((a) => getStableTaskId(a.title, a.id).key),
-              );
-              const missingFromDB = meetingCached.filter(
-                (t: any) => !existingKeys.has(getStableTaskId(t.title, t.id).key),
-              );
-              if (missingFromDB.length > 0) {
-                initialActions = [...initialActions, ...missingFromDB];
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.warn("To-Do cache load note:", e);
-      }
-
-      // If still no actions and meeting is completed, populate the deliverables corresponding to this meeting's topic
-      if (initialActions.length === 0 && meetingData?.status === "completed") {
-        const hostName = speakerRef.current || "Sumeet Made";
-        const meetingRef = meetingData?.scheduled_at || meetingData?.created_at || new Date();
-        const wedDate = resolveDeadlineToISODate("Wednesday", meetingRef) || "2026-10-21";
-        const friDate = resolveDeadlineToISODate("Friday", meetingRef) || "2026-10-23";
-        const tueDate = resolveDeadlineToISODate("Tuesday evening", meetingRef) || "2026-10-20";
-        const mentionsDashboard =
-          summaryText.toLowerCase().includes("dashboard") ||
-          transcriptList.some((t) => t.content.toLowerCase().includes("dashboard"));
-
-        if (isCollegeEvent) {
-          initialActions = [
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              title: "Handle registration and prepare participant list",
-              assignee: hostName,
-              deadline: friDate,
-              status: "pending",
-            },
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              title: "Take care of decoration for the event",
-              assignee: "Remote Participant",
-              deadline: null,
-              status: "pending",
-            },
-          ];
-        } else if (isMeeting2) {
-          // Meeting 2 deliverables
-          initialActions = [
-            {
-              id: STABLE_TASK_IDS.dashboard,
-              meeting_id: id,
-              title: "Complete & finalize project dashboard",
-              assignee: hostName,
-              deadline: wedDate,
-              status: "done", // Issue 1: Completed in Meeting 2
-            },
-            {
-              id: STABLE_TASK_IDS.share,
-              meeting_id: id,
-              title: "Share completed dashboard with Shreyash for review",
-              assignee: hostName,
-              deadline: wedDate,
-              status: "done",
-            },
-            {
-              id: STABLE_TASK_IDS.ui_testing,
-              meeting_id: id,
-              title: "Handle UI improvements and QA testing",
-              assignee: "Shreyash", // Issue 5: Attributed to Shreyash
-              deadline: friDate,
-              status: "done", // Issue 2: Reported complete in Meeting 2
-            },
-            {
-              id: STABLE_TASK_IDS.joint_review,
-              meeting_id: id,
-              title: "Joint review of all completed deliverables",
-              assignee: `Shreyash & ${hostName}`,
-              deadline: friDate,
-              status: "pending",
-            },
-          ];
-        } else if (isMeeting1 || mentionsDashboard) {
-          // Meeting 1 ("New1") deliverables
-          initialActions = [
-            {
-              id: STABLE_TASK_IDS.dashboard,
-              meeting_id: id,
-              title: "Complete & finalize project dashboard",
-              assignee: hostName,
-              deadline: wedDate,
-              status: "pending",
-            },
-            {
-              id: STABLE_TASK_IDS.share,
-              meeting_id: id,
-              title: "Share completed dashboard with Remote Participant for review",
-              assignee: hostName,
-              deadline: wedDate,
-              status: "done",
-            },
-            {
-              id: STABLE_TASK_IDS.ui_testing,
-              meeting_id: id,
-              title: "Handle UI improvements and QA testing",
-              assignee: "Remote Participant",
-              deadline: tueDate, // Issue 4: Aligned with discussion (Tuesday evening)
-              status: "pending",
-            },
-            {
-              id: STABLE_TASK_IDS.joint_review,
-              meeting_id: id,
-              title: "Joint review of all completed deliverables",
-              assignee: `Remote Participant & ${hostName}`,
-              deadline: friDate,
-              status: "pending",
-            },
-          ];
-        } else if (
-          summaryText.toLowerCase().includes("auth") ||
-          summaryText.toLowerCase().includes("sso") ||
-          summaryText.toLowerCase().includes("migration")
-        ) {
-          initialActions = [
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              title: "Own auth migration",
-              assignee: "Marcus Reed",
-              deadline: wedDate,
-              status: "pending",
-            },
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              title: "QA plan for auth",
-              assignee: "Priya Shah",
-              deadline: friDate,
-              status: "pending",
-            },
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              title: "Notify legacy SSO customers",
-              assignee: hostName,
-              deadline: friDate,
-              status: "done",
-            },
-          ];
-        } else if (
-          summaryText.toLowerCase().includes("design") ||
-          summaryText.toLowerCase().includes("landing")
-        ) {
-          initialActions = [
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              title: "Finalize landing page design v3",
-              assignee: hostName,
-              deadline: friDate,
-              status: "pending",
-            },
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              title: "Conduct responsive UI review for landing components",
-              assignee: "Marcus Reed",
-              deadline: wedDate,
-              status: "pending",
-            },
-          ];
-        } else if (summary?.follow_ups && (summary.follow_ups as string[]).length > 0) {
-          initialActions = (summary.follow_ups as string[]).map((f: string) => {
-            const fLower = f.toLowerCase();
-            let dLine = friDate;
-            if (fLower.includes("wednesday")) dLine = wedDate;
-            else if (fLower.includes("tuesday")) dLine = tueDate;
-            return {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              title: f,
-              assignee: hostName,
-              deadline: dLine,
-              status: "pending",
-            };
-          });
-        } else if (summaryText) {
-          const sentences =
-            `${summaryText}. ${((summary?.key_points || []) as string[]).join(". ")}`
-              .split(/\. |\.\n/)
-              .map((s: string) => s.trim())
-              .filter(Boolean);
-          for (const s of sentences) {
-            const lower = s.toLowerCase();
-            if (
-              lower.includes("will ") ||
-              lower.includes("prepare") ||
-              lower.includes("handle") ||
-              lower.includes("review") ||
-              lower.includes("owns") ||
-              lower.includes("complete") ||
-              lower.includes("ship") ||
-              lower.includes("coordinate")
-            ) {
-              let clean = s;
-              let assignee = hostName;
-              if (clean.toLowerCase().startsWith("sumeet agreed to ")) clean = clean.slice(17);
-              else if (clean.toLowerCase().includes("agreed to "))
-                clean = clean.slice(clean.toLowerCase().indexOf("agreed to ") + 10);
-              clean = clean.charAt(0).toUpperCase() + clean.slice(1);
-              if (
-                clean.length > 5 &&
-                !initialActions.some((a) => a.title.toLowerCase() === clean.toLowerCase())
-              ) {
-                let dLine = friDate;
-                if (lower.includes("wednesday")) dLine = wedDate;
-                else if (lower.includes("tuesday")) dLine = tueDate;
-                initialActions.push({
-                  id: crypto.randomUUID(),
-                  meeting_id: id,
-                  title: clean,
-                  assignee,
-                  deadline: dLine,
-                  status: "pending",
-                });
-              }
-            }
-          }
-        }
-
-        if (initialActions.length > 0) {
-          // Persist to DB in background
-          supabase
-            .from("action_items")
-            .upsert(
-              initialActions.map((a) => ({
-                id: a.id,
-                meeting_id: id,
-                title: a.title,
-                assignee: a.assignee,
-                deadline: a.deadline,
-                status: a.status,
-              })),
-            )
-            .then(() => {});
-        }
-      }
-
-      // Reconcile and update existing actions against cross-meeting truths
-      initialActions = initialActions.map((a) => {
-        const aTitleLower = (a.title || "").toLowerCase();
-        let updated = { ...a };
-
-        if (isMeeting2) {
-          // Issue 5: Attribute to Shreyash
-          if ((updated.assignee || "").includes("Remote Participant")) {
-            updated.assignee = updated.assignee.replace(/Remote Participant/g, "Shreyash");
-          }
-          if (updated.title.includes("Remote Participant")) {
-            updated.title = updated.title.replace(/Remote Participant/g, "Shreyash");
-          }
-          // Issue 1: Dashboard completed in Meeting 2
-          if (aTitleLower.includes("dashboard")) {
-            updated.status = "done";
-          }
-          // Issue 2: UI improvements reported complete in Meeting 2
-          if (aTitleLower.includes("ui improvement") || aTitleLower.includes("ui improvements")) {
-            updated.status = "done";
-            updated.assignee = "Shreyash";
-          }
-        } else if (isMeeting1) {
-          // Issue 4: Deadline inconsistency in Meeting 1 -> Tuesday evening
-          if (aTitleLower.includes("ui improvement") || aTitleLower.includes("ui improvements")) {
-            const meetingRef = meetingData?.scheduled_at || meetingData?.created_at || new Date();
-            updated.deadline =
-              resolveDeadlineToISODate("Tuesday evening", meetingRef) || "2026-10-20";
-          }
-        }
-        return updated;
-      });
-
-      // STRICT ISOLATION: Only tasks belonging strictly to THIS meeting are allowed in this meeting's tab
-      initialActions = initialActions.filter((a) => a.meeting_id === id);
-
-      // Deduplicate actions for this meeting so no task is duplicated
-      const seenTaskKeys = new Set<string>();
-      const dedupedMeetingActions: Action[] = [];
-      for (const a of initialActions) {
-        const { key } = getStableTaskId(a.title, a.id);
-        if (!seenTaskKeys.has(key)) {
-          seenTaskKeys.add(key);
-          dedupedMeetingActions.push(a);
-        }
-      }
-      initialActions = dedupedMeetingActions;
-
-      const statusMap = getSavedStatusMap();
-      initialActions = initialActions.map((a) => {
-        const isCompletedInM2 =
-          isMeeting2 &&
-          (a.title.toLowerCase().includes("dashboard") ||
-            a.title.toLowerCase().includes("ui improvement"));
-        const finalStatus = isCompletedInM2
-          ? "done"
-          : statusMap[a.id] || statusMap[a.title.toLowerCase().trim()] || a.status;
-
-        if (isCompletedInM2) {
-          saveStatusToStorage(a.id, a.title, "done");
-        }
-        return {
-          ...a,
-          status: finalStatus,
-        };
-      });
-
-      // Persist completed status to DB for Meeting 2 actions so database records are updated
-      if (isMeeting2) {
-        const completedIds = initialActions.filter((a) => a.status === "done").map((a) => a.id);
-        if (completedIds.length > 0) {
-          supabase
-            .from("action_items")
-            .update({ status: "done" })
-            .in("id", completedIds)
-            .then(() => {});
-        }
-        supabase
-          .from("action_items")
-          .update({ status: "done" })
-          .eq("meeting_id", id)
-          .ilike("title", "%dashboard%")
-          .then(() => {});
-        supabase
-          .from("action_items")
-          .update({ status: "done" })
-          .eq("meeting_id", id)
-          .ilike("title", "%ui improvement%")
-          .then(() => {});
-      }
-
-      // Ensure global To-Do cache preserves tasks across ALL workspace meetings without duplicates
-      try {
-        const rawCached =
-          typeof window !== "undefined" ? localStorage.getItem("ai_meeting_todo_cache") : null;
-        let allCached = rawCached ? JSON.parse(rawCached) : [];
-        if (!Array.isArray(allCached)) allCached = [];
-        const otherMeetingTasks = allCached.filter((t: any) => t.meeting_id !== id);
-
-        const cacheMap = new Map<string, any>();
-        for (const t of [...otherMeetingTasks, ...initialActions]) {
-          const { key } = getStableTaskId(t.title, t.id);
-          if (!cacheMap.has(key) || t.meeting_id === id) {
-            cacheMap.set(key, t);
-          }
-        }
-        const mergedWorkspaceTasks = Array.from(cacheMap.values());
-        localStorage.setItem("ai_meeting_todo_cache", JSON.stringify(mergedWorkspaceTasks));
-      } catch (e) {
-        console.warn("Global To-Do cache sync note:", e);
-      }
-
-      // Auto-populate summary if missing
-      if (!summaryData && meetingData?.status === "completed") {
-        if (isCollegeEvent) {
-          summaryData = {
-            meeting_id: id,
-            executive_summary:
-              "The team discussed preparations for the upcoming college event. Tasks were divided between handling registration and decorating the venue.",
-            key_points: [
-              "Participant registration and listing will be managed by Friday.",
-              "Event decorations will be handled by the team.",
-            ],
-            risks: [],
-            follow_ups: [
-              "Finalize attendee list before Friday.",
-              "Coordinate decoration setup prior to the event.",
-            ],
-          };
-        } else if (isMeeting2) {
-          summaryData = {
-            meeting_id: id,
-            executive_summary:
-              "The team reviewed project deliverables with Shreyash. The project dashboard and UI improvements have both been completed successfully. The team is now conducting final reviews and QA verification.",
-            key_points: [
-              "Project dashboard completed and verified.",
-              "UI improvements and QA testing completed by Shreyash.",
-              "Joint review of all completed deliverables underway.",
-            ],
-            risks: [],
-            follow_ups: ["Finalize joint review with Shreyash.", "Deploy verified features."],
-          };
-        } else {
-          summaryData = {
-            meeting_id: id,
-            executive_summary:
-              "The team reviewed project progress and agreed on next steps. Sumeet Made will prioritize completing the dashboard by Wednesday, while Remote Participant will handle UI improvements and testing by Tuesday evening.",
-            key_points: [
-              "Project dashboard prioritized for completion by Wednesday.",
-              "Remote Participant will complete UI improvements and QA testing by Tuesday evening.",
-              "Joint review of all completed deliverables scheduled upon submission.",
-            ],
-            risks: [],
-            follow_ups: [
-              "Review completed dashboard on Wednesday.",
-              "Verify UI improvements on Tuesday evening.",
-            ],
-          };
-        }
-
-        // Save to DB in background
-        supabase
-          .from("ai_summaries")
-          .upsert({
-            meeting_id: id,
-            executive_summary: summaryData.executive_summary,
-            key_points: summaryData.key_points,
-            risks: summaryData.risks,
-            follow_ups: summaryData.follow_ups,
-          })
-          .then(() => {});
-      }
-
-      // Issue 3: Deduplicate decisions by normalized description so Meeting 1 never repeats decisions
-      decisionsData = deduplicateDecisions(decisionsData);
-
-      // Clean up any duplicate rows in DB for this meeting
-      if (dd.data && (dd.data as Decision[]).length > decisionsData.length) {
-        const keepIds = new Set(decisionsData.map((d) => d.id));
-        const duplicateIdsToDelete = (dd.data as Decision[])
-          .filter((d) => !keepIds.has(d.id))
-          .map((d) => d.id);
-        if (duplicateIdsToDelete.length > 0) {
-          supabase
-            .from("decisions")
-            .delete()
-            .in("id", duplicateIdsToDelete)
-            .then(() => {});
-        }
-      }
-
-      // Auto-populate decisions if missing
-      if (decisionsData.length === 0 && meetingData?.status === "completed") {
-        if (isCollegeEvent) {
-          decisionsData = [
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              description: "Handle registration and prepare the participant list by Friday.",
-              made_by: "Both Participants",
-              created_at: new Date().toISOString(),
-            },
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              description: "Take care of decoration arrangements for the event.",
-              made_by: "Both Participants",
-              created_at: new Date().toISOString(),
-            },
-          ];
-        } else if (isMeeting2) {
-          decisionsData = [
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              description:
-                "Review and approve completed project dashboard and UI improvements with Shreyash.",
-              made_by: "Both Participants",
-              created_at: new Date().toISOString(),
-            },
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              description: "Perform joint QA verification and finalize all project deliverables.",
-              made_by: "Both Participants",
-              created_at: new Date().toISOString(),
-            },
-          ];
-        } else {
-          decisionsData = [
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              description:
-                "Prioritize and complete the project dashboard by Wednesday, then share with Remote Participant for review.",
-              made_by: "Both Participants",
-              created_at: new Date().toISOString(),
-            },
-            {
-              id: crypto.randomUUID(),
-              meeting_id: id,
-              description:
-                "Finalize UI improvements and QA testing by Tuesday evening, followed by a joint review.",
-              made_by: "Both Participants",
-              created_at: new Date().toISOString(),
-            },
-          ];
-        }
-
-        // Save to DB in background
-        supabase
-          .from("decisions")
-          .upsert(
-            decisionsData.map((d) => ({
-              id: d.id,
-              meeting_id: id,
-              description: d.description,
-              made_by: d.made_by,
-            })),
-          )
-          .then(() => {});
-      }
+      if (mm.error) throw mm.error;
+      const transcriptList = (tt.data as Transcript[]) ?? [];
+      const participantList = (pp.data as Participant[]) ?? [];
+      const initialActions = (aa.data as Action[]) ?? [];
+      const summaryData = (ss.data as Summary | null) ?? null;
+      const decisionsData = (dd.data as Decision[]) ?? [];
 
       setM(meetingData);
       setTranscripts(transcriptList);
@@ -1587,28 +818,6 @@ function MeetingDetail() {
 
   useEffect(() => {
     load();
-
-    // Cross-tab & Real-time synchronization for action items
-    let bc: BroadcastChannel | null = null;
-    if (typeof window !== "undefined" && "BroadcastChannel" in window) {
-      bc = new BroadcastChannel("meeting_tasks_sync");
-      bc.onmessage = (event) => {
-        if (event.data?.type === "TASK_STATUS_UPDATED") {
-          setActions((prev) =>
-            prev.map((a) => (a.id === event.data.id ? { ...a, status: event.data.status } : a)),
-          );
-        } else if (event.data?.type === "TASK_DELETED") {
-          setActions((prev) => prev.filter((a) => a.id !== event.data.id));
-        } else if (event.data?.type === "TASK_CREATED" && event.data.task) {
-          if (event.data.task.meeting_id === id) {
-            setActions((prev) => {
-              if (prev.some((a) => a.id === event.data.task.id)) return prev;
-              return [...prev, event.data.task];
-            });
-          }
-        }
-      };
-    }
 
     const channel = supabase
       .channel(`meeting_actions_realtime_${id}`)
@@ -1632,7 +841,6 @@ function MeetingDetail() {
       .subscribe();
 
     return () => {
-      bc?.close();
       supabase.removeChannel(channel);
     };
   }, [id]);
@@ -2157,134 +1365,15 @@ function MeetingDetail() {
         return;
       }
 
-      // 1. Try server sync function
-      try {
-        const res: any = await syncActionItems({ data: { meetingId: id } });
-        const items = Array.isArray(res) ? res : res?.action_items || [];
-        const decs = res?.decisions || [];
-
-        if (decs && decs.length > 0) {
-          setDecisions(decs as Decision[]);
-        }
-
-        if (items && items.length > 0) {
-          setActions(items as Action[]);
-          toast.success(`Extracted ${items.length} action item(s) and synced to your To-Do list!`);
-          return;
-        }
-      } catch (e) {
-        console.warn("syncActionItems attempt:", e);
+      const res = await syncActionItems({ data: { meetingId: id } });
+      const items = (res?.action_items ?? []) as Action[];
+      setDecisions((res?.decisions ?? []) as Decision[]);
+      setActions(items);
+      if (items.length > 0) {
+        toast.success(`Extracted ${items.length} action item(s) from this meeting.`);
+      } else {
+        toast.info("No action items were found in this meeting.");
       }
-
-      // 2. Direct extraction from executive summary
-      const hostName = speakerRef.current || "Sumeet Made";
-      const summaryText = summary?.executive_summary || "";
-      const keyPoints = (summary?.key_points || []) as string[];
-      const followUps = (summary?.follow_ups || []) as string[];
-      const combined = `${summaryText}. ${keyPoints.join(". ")}`;
-      const sentences = combined
-        .split(/\. |\.\n/)
-        .map((s: string) => s.trim())
-        .filter(Boolean);
-      const candidateTasks: { title: string; assignee: string; deadline: string | null }[] = [];
-      const meetingRef = meetingData?.scheduled_at || meetingData?.created_at || new Date();
-      const friDate = resolveDeadlineToISODate("Friday", meetingRef) || "2026-10-23";
-      const wedDate = resolveDeadlineToISODate("Wednesday", meetingRef) || "2026-10-21";
-      const tueDate = resolveDeadlineToISODate("Tuesday evening", meetingRef) || "2026-10-20";
-
-      // Include follow-ups from summary
-      if (followUps.length > 0) {
-        for (const f of followUps) {
-          const fLower = f.toLowerCase();
-          let dLine = friDate;
-          if (fLower.includes("wednesday")) dLine = wedDate;
-          else if (fLower.includes("tuesday")) dLine = tueDate;
-          if (!candidateTasks.some((c) => c.title.toLowerCase() === f.toLowerCase())) {
-            candidateTasks.push({
-              title: f,
-              assignee: hostName,
-              deadline: dLine,
-            });
-          }
-        }
-      }
-
-      for (const s of sentences) {
-        const lower = s.toLowerCase();
-        if (lower.includes("registration") || lower.includes("participant list")) {
-          if (!candidateTasks.some((c) => c.title.toLowerCase().includes("registration"))) {
-            candidateTasks.push({
-              title: "Handle registration and prepare participant list",
-              assignee: hostName,
-              deadline: friDate,
-            });
-          }
-        } else if (lower.includes("decoration")) {
-          if (!candidateTasks.some((c) => c.title.toLowerCase().includes("decoration"))) {
-            candidateTasks.push({
-              title: "Take care of decoration for the event",
-              assignee: "Remote Participant",
-              deadline: null,
-            });
-          }
-        } else if (
-          lower.includes("agreed to") ||
-          lower.includes("prepare") ||
-          lower.includes("presentation") ||
-          lower.includes("task") ||
-          lower.includes("will ") ||
-          lower.includes("owns")
-        ) {
-          let clean = s;
-          let assignee = hostName;
-          if (lower.includes("remote participant")) assignee = "Remote Participant";
-          if (clean.toLowerCase().startsWith("sumeet agreed to ")) clean = clean.slice(17);
-          else if (clean.toLowerCase().includes("agreed to "))
-            clean = clean.slice(clean.toLowerCase().indexOf("agreed to ") + 10);
-          clean = clean.charAt(0).toUpperCase() + clean.slice(1);
-          if (
-            clean.length > 5 &&
-            !candidateTasks.some((c) => c.title.toLowerCase() === clean.toLowerCase())
-          ) {
-            let dLine = null;
-            if (lower.includes("friday")) dLine = friDate;
-            else if (lower.includes("wednesday")) dLine = wedDate;
-            else if (lower.includes("tuesday")) dLine = tueDate;
-            candidateTasks.push({ title: clean, assignee, deadline: dLine });
-          }
-        }
-      }
-
-      if (candidateTasks.length > 0) {
-        await supabase.from("action_items").delete().eq("meeting_id", id);
-        const toInsert = candidateTasks.map((c) => ({
-          meeting_id: id,
-          title: c.title,
-          assignee: c.assignee,
-          deadline: c.deadline,
-          status: "pending",
-        }));
-        const { data: ins, error: insErr } = await supabase
-          .from("action_items")
-          .insert(toInsert)
-          .select();
-        if (insErr) {
-          await supabase.from("action_items").insert(toInsert);
-          const fallbackActions = toInsert.map((t) => ({ ...t, id: crypto.randomUUID() }));
-          setActions(fallbackActions as Action[]);
-          toast.success(
-            `Extracted ${fallbackActions.length} action item(s) and synced to your To-Do list!`,
-          );
-          return;
-        }
-        if (ins && ins.length > 0) {
-          setActions(ins as Action[]);
-          toast.success(`Extracted ${ins.length} action item(s) and synced to your To-Do list!`);
-          return;
-        }
-      }
-
-      toast.info("No action items detected in transcript/summary.");
     } catch (err: any) {
       toast.error(getFriendlyErrorMessage(err, "Failed to sync action items."));
     } finally {
@@ -2308,28 +1397,8 @@ function MeetingDetail() {
         status: "pending",
       };
 
-      // 1. Save status to map
-      saveStatusToStorage(taskId, newActionObj.title, "pending");
-
       // 2. Optimistic update
       setActions((prev) => [...prev, newActionObj]);
-
-      // 3. Persist to global todo cache
-      try {
-        const rawCached = localStorage.getItem("ai_meeting_todo_cache");
-        const list = rawCached ? JSON.parse(rawCached) : [];
-        const filtered = Array.isArray(list) ? list.filter((x: any) => x.id !== taskId) : [];
-        localStorage.setItem("ai_meeting_todo_cache", JSON.stringify([newActionObj, ...filtered]));
-      } catch (e) {}
-
-      // 4. Broadcast
-      try {
-        if (typeof window !== "undefined" && "BroadcastChannel" in window) {
-          const bc = new BroadcastChannel("meeting_tasks_sync");
-          bc.postMessage({ type: "TASK_CREATED", task: newActionObj });
-          bc.close();
-        }
-      } catch (e) {}
 
       setAddTaskModalOpen(false);
       setNewTaskTitle("");
@@ -2362,7 +1431,7 @@ function MeetingDetail() {
     if (!newDecisionDescription.trim()) return;
     setAddingDecision(true);
     try {
-      const madeBy = newDecisionMadeBy.trim() || "Both Participants";
+      const madeBy = newDecisionMadeBy.trim() || null;
       const { data: inserted, error } = await supabase
         .from("decisions")
         .insert({
@@ -2400,31 +1469,7 @@ function MeetingDetail() {
 
   async function toggleActionStatus(actionId: string, currentStatus: string) {
     const nextStatus = currentStatus === "done" ? "pending" : "done";
-    const targetAction = actions.find((a) => a.id === actionId);
-    saveStatusToStorage(actionId, targetAction?.title || "", nextStatus);
-
     setActions((prev) => prev.map((a) => (a.id === actionId ? { ...a, status: nextStatus } : a)));
-
-    // Broadcast instantly to To-Do board and other open tabs
-    try {
-      if (typeof window !== "undefined" && "BroadcastChannel" in window) {
-        const bc = new BroadcastChannel("meeting_tasks_sync");
-        bc.postMessage({ type: "TASK_STATUS_UPDATED", id: actionId, status: nextStatus });
-        bc.close();
-      }
-      const cached = localStorage.getItem("ai_meeting_todo_cache");
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) {
-          const updated = parsed.map((t: any) =>
-            t.id === actionId ? { ...t, status: nextStatus } : t,
-          );
-          localStorage.setItem("ai_meeting_todo_cache", JSON.stringify(updated));
-        }
-      }
-    } catch (e) {
-      console.warn("Sync broadcast note:", e);
-    }
 
     try {
       try {
@@ -2441,24 +1486,6 @@ function MeetingDetail() {
 
   async function deleteMeetingAction(actionId: string) {
     setActions((prev) => prev.filter((a) => a.id !== actionId));
-
-    try {
-      if (typeof window !== "undefined" && "BroadcastChannel" in window) {
-        const bc = new BroadcastChannel("meeting_tasks_sync");
-        bc.postMessage({ type: "TASK_DELETED", id: actionId });
-        bc.close();
-      }
-      const cached = localStorage.getItem("ai_meeting_todo_cache");
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed)) {
-          const updated = parsed.filter((t: any) => t.id !== actionId);
-          localStorage.setItem("ai_meeting_todo_cache", JSON.stringify(updated));
-        }
-      }
-    } catch (e) {
-      console.warn("Sync broadcast delete note:", e);
-    }
 
     try {
       try {
@@ -2835,7 +1862,7 @@ function MeetingDetail() {
                 <Button
                   variant="outline"
                   className="glass rounded-full border-white/10"
-                  onClick={() => window.open(m.meeting_link!, "_blank")}
+                  onClick={() => window.open(m.meeting_link!, "_blank", "noopener,noreferrer")}
                 >
                   Open Link
                 </Button>
@@ -3086,7 +2113,7 @@ function MeetingDetail() {
                           Paste dialogue or meeting transcripts below. Gemini AI will fix any
                           speech-to-text typos (e.g. &quot;police dashboard&quot; &rarr;
                           &quot;finish the dashboard&quot;) and correctly attribute speaker turns
-                          between <b>Remote Participant</b> and <b>Sumeet Made</b>.
+                          between the people in this meeting.
                         </DialogDescription>
                       </DialogHeader>
 
@@ -3095,7 +2122,7 @@ function MeetingDetail() {
                           rows={12}
                           value={rawScriptInput}
                           onChange={(e) => setRawScriptInput(e.target.value)}
-                          placeholder="Paste dialogue here, for example:&#10;&#10;Remote Participant: Hi good morning thanks for joining...&#10;Sumeet Made: Good morning sure let's get started...&#10;Remote Participant: The frontend development is almost complete...&#10;Sumeet Made: I agree I will complete the dashboard by Wednesday..."
+                          placeholder="Paste dialogue here, one line per turn, as Speaker: text"
                           className="font-mono text-xs leading-relaxed bg-black/40 border-white/10"
                         />
                       </div>
@@ -3699,7 +2726,7 @@ function MeetingDetail() {
                             Assignee
                           </label>
                           <Input
-                            placeholder={speakerRef.current || "Sumeet Made"}
+                            placeholder={speakerRef.current || "Assignee name"}
                             value={newTaskAssignee}
                             onChange={(e) => setNewTaskAssignee(e.target.value)}
                             className="bg-white/5 border-white/10"
@@ -3866,7 +2893,7 @@ function MeetingDetail() {
                           Decision Description
                         </label>
                         <Textarea
-                          placeholder="e.g. Divide college event responsibilities: Sumeet handles registration, Remote handles decoration"
+                          placeholder="Describe the decision"
                           value={newDecisionDescription}
                           onChange={(e) => setNewDecisionDescription(e.target.value)}
                           required
@@ -3879,7 +2906,7 @@ function MeetingDetail() {
                           Decided By (Optional)
                         </label>
                         <Input
-                          placeholder="e.g. Both Participants or Sumeet Made"
+                          placeholder="Who made the decision"
                           value={newDecisionMadeBy}
                           onChange={(e) => setNewDecisionMadeBy(e.target.value)}
                           className="bg-white/5 border-white/10"
@@ -4005,7 +3032,7 @@ function MeetingDetail() {
                             Assignee
                           </label>
                           <Input
-                            placeholder={speakerRef.current || "Sumeet Made"}
+                            placeholder={speakerRef.current || "Assignee name"}
                             value={newTaskAssignee}
                             onChange={(e) => setNewTaskAssignee(e.target.value)}
                             className="bg-white/5 border-white/10"
@@ -4511,8 +3538,8 @@ function MeetingDetail() {
                       key={p.id}
                       type="button"
                       onClick={() => {
-                        const emailToAdd =
-                          p.email || `${p.name.toLowerCase().replace(/\s+/g, "")}@example.com`;
+                        const emailToAdd = p.email;
+                        if (!emailToAdd) return;
                         if (!emailRecipients.includes(emailToAdd)) {
                           setEmailRecipients((prev) =>
                             prev ? `${prev}, ${emailToAdd}` : emailToAdd,
@@ -4529,10 +3556,8 @@ function MeetingDetail() {
                     type="button"
                     onClick={() => {
                       const all = participants
-                        .map(
-                          (p) =>
-                            p.email || `${p.name.toLowerCase().replace(/\s+/g, "")}@example.com`,
-                        )
+                        .map((p) => p.email)
+                        .filter(Boolean)
                         .join(", ");
                       setEmailRecipients(all);
                     }}
@@ -4634,23 +3659,6 @@ function MeetingDetail() {
             Ask AI →
           </Link>
         </p>
-
-        {((m?.title || "").toLowerCase().includes("new2") ||
-          (m?.title || "").toLowerCase().includes("meeting 2") ||
-          (summary?.executive_summary || "").toLowerCase().includes("shreyash")) && (
-          <div className="pt-2 border-t border-white/5 space-y-2 text-xs">
-            <div className="flex items-center gap-2 text-emerald-400">
-              <Check className="h-3.5 w-3.5" />
-              <span>Verified completed: Project dashboard & UI improvements (Shreyash).</span>
-            </div>
-            <div className="flex items-center gap-2 text-amber-400">
-              <Calendar className="h-3.5 w-3.5" />
-              <span>
-                Active commitment retained: Joint review of all completed deliverables (Friday).
-              </span>
-            </div>
-          </div>
-        )}
       </section>
     </div>
   );
