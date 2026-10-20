@@ -31,6 +31,7 @@ import {
 import { notificationKeys, useUnreadNotificationCount } from "@/components/layout/notifications";
 import { useDisplayName, useUser } from "@/lib/auth";
 import { seedDemoWorkspace } from "@/lib/rpc";
+import { normalizeMeetingStatus } from "@/components/layout/status";
 
 export const Route = createFileRoute("/_authenticated/user/dashboard")({
   head: () => ({ meta: [{ title: "My workspace — AI Meeting Companion" }] }),
@@ -68,20 +69,13 @@ async function loadDashboard(userId: string): Promise<DashboardData> {
     .order("scheduled_at", { ascending: true, nullsFirst: false });
   if (error) throw new Error("Could not load your meetings.");
 
-  const ids = (meetings ?? []).map((m) => m.id);
-  const ownerFilter = ids.length
-    ? `assignee_user_id.eq.${userId},meeting_id.in.(${ids.join(",")})`
-    : `assignee_user_id.eq.${userId}`;
-
+  // Both queries filter in the database, so no list of meeting ids is sent in the URL.
   const [summaries, tasks] = await Promise.all([
-    ids.length
-      ? supabase.from("ai_summaries").select("meeting_id").in("meeting_id", ids)
-      : Promise.resolve({ data: [] as { meeting_id: string }[], error: null }),
     supabase
-      .from("action_items")
-      .select("id", { count: "exact", head: true })
-      .neq("status", "done")
-      .or(ownerFilter),
+      .from("ai_summaries")
+      .select("meeting_id, meetings!inner(host_id)")
+      .eq("meetings.host_id", userId),
+    supabase.rpc("my_open_task_count"),
   ]);
   if (summaries.error) throw new Error("Could not load your meeting summaries.");
   if (tasks.error) throw new Error("Could not load your tasks.");
@@ -89,7 +83,7 @@ async function loadDashboard(userId: string): Promise<DashboardData> {
   return {
     meetings: meetings ?? [],
     summaryMeetingIds: new Set((summaries.data ?? []).map((s) => s.meeting_id)),
-    openTasks: tasks.count ?? 0,
+    openTasks: tasks.data ?? 0,
   };
 }
 
@@ -136,7 +130,7 @@ function UserDashboard() {
   ).length;
   const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
   const upcomingThisWeek = meetings.filter((m) => {
-    if (!m.scheduled_at || m.status === "completed") return false;
+    if (!m.scheduled_at || normalizeMeetingStatus(m.status) === "completed") return false;
     const t = new Date(m.scheduled_at);
     return t >= now && t <= weekEnd;
   }).length;
@@ -145,12 +139,21 @@ function UserDashboard() {
   const upcoming = meetings
     .filter(
       (m) =>
-        m.status === "live" ||
-        (m.status === "upcoming" && (!m.scheduled_at || new Date(m.scheduled_at) >= todayStart)),
+        normalizeMeetingStatus(m.status) === "live" ||
+        (normalizeMeetingStatus(m.status) === "upcoming" &&
+          (!m.scheduled_at || new Date(m.scheduled_at) >= todayStart)),
     )
     .sort((a, b) => {
-      if (a.status === "live" && b.status !== "live") return -1;
-      if (b.status === "live" && a.status !== "live") return 1;
+      if (
+        normalizeMeetingStatus(a.status) === "live" &&
+        normalizeMeetingStatus(b.status) !== "live"
+      )
+        return -1;
+      if (
+        normalizeMeetingStatus(b.status) === "live" &&
+        normalizeMeetingStatus(a.status) !== "live"
+      )
+        return 1;
       if (!a.scheduled_at) return 1;
       if (!b.scheduled_at) return -1;
       return a.scheduled_at.localeCompare(b.scheduled_at);
@@ -158,7 +161,7 @@ function UserDashboard() {
     .slice(0, 4);
 
   const recent = meetings
-    .filter((m) => m.status === "completed")
+    .filter((m) => normalizeMeetingStatus(m.status) === "completed")
     .sort((a, b) =>
       (b.started_at ?? b.scheduled_at ?? b.created_at).localeCompare(
         a.started_at ?? a.scheduled_at ?? a.created_at,
@@ -168,6 +171,11 @@ function UserDashboard() {
 
   async function loadDemo() {
     const result = await seedDemoWorkspace();
+    if (!result.created) {
+      toast.info("Demo workspace is already loaded.");
+      await queryClient.invalidateQueries({ queryKey: dashboardKey(userId) });
+      return;
+    }
     toast.success(
       `Demo workspace added: ${result.meeting_ids.length} sample meetings with transcripts, summaries and tasks.`,
     );
@@ -382,7 +390,7 @@ function UpcomingCard({ meeting: m }: { meeting: MeetingRow }) {
         <div className="gradient-bg grid h-9 w-9 place-items-center rounded-xl">
           <Video className="h-4 w-4 text-primary-foreground" />
         </div>
-        <StatusBadge status={m.status} />
+        <StatusBadge kind="meeting" status={m.status} />
       </div>
       <h3 className="mt-4 truncate text-lg font-semibold">{m.title}</h3>
       <div className="mt-1 space-y-1 text-sm text-muted-foreground">

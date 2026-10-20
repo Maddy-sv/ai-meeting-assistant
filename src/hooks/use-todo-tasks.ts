@@ -97,23 +97,22 @@ export function useTodoTasks() {
       setUserName(prof?.full_name?.trim() || auth.user.email?.split("@")[0] || "");
       const meetingList = (mData ?? []) as TodoMeeting[];
       setMeetings(meetingList);
-      const ids = meetingList.map((m) => m.id);
-      meetingIdsRef.current = new Set(ids);
+      meetingIdsRef.current = new Set(meetingList.map((m) => m.id));
 
-      const own = ids.length
-        ? await supabase
-            .from("action_items")
-            .select("*")
-            .in("meeting_id", ids)
-            .order("created_at", { ascending: false })
-        : { data: [], error: null };
+      // Join on the meeting and filter by host in the database, so the request
+      // does not grow with the number of meetings.
+      const own = await supabase
+        .from("action_items")
+        .select("*, meetings!inner(host_id)")
+        .eq("meetings.host_id", uid)
+        .order("created_at", { ascending: false });
       if (own.error) throw new Error(own.error.message);
 
       // Items other hosts assigned to this user (visible through the assignee RLS policy).
       const assigned = await supabase
         .from("action_items")
         .select("*")
-        .or(`assignee_user_id.eq.${uid}`)
+        .eq("assignee_user_id", uid)
         .order("created_at", { ascending: false });
       if (assigned.error) {
         toast.error(
@@ -125,10 +124,8 @@ export function useTodoTasks() {
       }
 
       const byId = new Map<string, TodoTask>();
-      for (const row of [
-        ...((own.data ?? []) as RawTask[]),
-        ...((assigned.data ?? []) as RawTask[]),
-      ]) {
+      const ownRows = (own.data ?? []).map(({ meetings: _meeting, ...row }) => row as RawTask);
+      for (const row of [...ownRows, ...((assigned.data ?? []) as RawTask[])]) {
         byId.set(row.id, normalize(row));
       }
       setTasks(Array.from(byId.values()));

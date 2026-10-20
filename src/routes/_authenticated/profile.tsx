@@ -531,8 +531,8 @@ function DemoWorkspaceCard() {
 
   async function loadDemo() {
     const result = await seedDemoWorkspace();
-    if (result.created === false) {
-      toast.info("Demo workspace already loaded.");
+    if (!result.created) {
+      toast.info("Demo workspace is already loaded.");
     } else {
       toast.success(
         `Demo workspace added: ${result.meeting_ids.length} sample meetings with transcripts, summaries and tasks.`,

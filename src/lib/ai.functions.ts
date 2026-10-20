@@ -825,9 +825,7 @@ const UpdateStatusInput = z.object({ actionId: uuid, status: statusSchema });
 
 export const updateActionItemStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((input: z.input<typeof UpdateStatusInput>) =>
-    parseInput(UpdateStatusInput, input),
-  )
+  .validator((input: z.input<typeof UpdateStatusInput>) => parseInput(UpdateStatusInput, input))
   .handler(async ({ data, context }) => {
     const { data: rows, error } = await context.supabase
       .from("action_items")
@@ -876,19 +874,21 @@ export const fetchUserTodoTasks = createServerFn({ method: "POST" })
       .eq("host_id", userId);
     if (mErr) fail("load meetings", mErr, "Could not load your meetings.");
     const titles = new Map((meetings ?? []).map((m) => [m.id, m.title]));
-    const ids = Array.from(titles.keys());
 
+    // Filter by host through a join, so the request does not grow with the number of meetings.
     const [own, assigned] = await Promise.all([
-      ids.length
-        ? supabase.from("action_items").select("*").in("meeting_id", ids)
-        : Promise.resolve({ data: [] as ActionItemRow[], error: null }),
+      supabase
+        .from("action_items")
+        .select("*, meetings!inner(host_id)")
+        .eq("meetings.host_id", userId),
       supabase.from("action_items").select("*").eq("assignee_user_id", userId),
     ]);
     if (own.error) fail("load tasks", own.error, "Could not load your tasks.");
     if (assigned.error) fail("load assigned tasks", assigned.error, "Could not load your tasks.");
 
     const byId = new Map<string, TodoTask>();
-    for (const t of [...(own.data ?? []), ...(assigned.data ?? [])]) {
+    const ownRows = (own.data ?? []).map(({ meetings: _meeting, ...row }) => row);
+    for (const t of [...ownRows, ...(assigned.data ?? [])]) {
       byId.set(t.id, {
         ...t,
         meeting_title: titles.get(t.meeting_id) ?? null,
@@ -910,9 +910,7 @@ const CreateActionInput = z.object({
 
 export const createActionItemServer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((input: z.input<typeof CreateActionInput>) =>
-    parseInput(CreateActionInput, input),
-  )
+  .validator((input: z.input<typeof CreateActionInput>) => parseInput(CreateActionInput, input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     await requireOwnedMeeting(supabase, userId, data.meetingId);

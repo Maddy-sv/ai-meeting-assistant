@@ -120,7 +120,7 @@ export interface SeedDemoResult {
   project_id: string;
   meeting_ids: string[];
   /** False when the demo project already existed, so nothing new was added. */
-  created?: boolean;
+  created: boolean;
 }
 /** Inserts the sample research-scenario workspace for the calling user only. */
 export function seedDemoWorkspace(): Promise<SeedDemoResult> {
