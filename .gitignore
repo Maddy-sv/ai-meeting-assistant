@@ -44,3 +44,6 @@ __pycache__/
 
 # Unrelated research-paper tooling kept locally
 paper_revision/
+
+# Local agent worktrees
+.claude/worktrees/
