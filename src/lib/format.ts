@@ -1,3 +1,5 @@
+import { safeFormatDeadline } from "@/lib/continuous-memory";
+
 export function formatDuration(seconds: number | null | undefined): string {
   const s = seconds ?? 0;
   const m = Math.round(s / 60);
@@ -27,4 +29,12 @@ export function safeExternalUrl(link: string | null | undefined): string | null 
   } catch {
     return null;
   }
+}
+
+export function formatDeadlineFrom(
+  deadline: string | null | undefined,
+  referenceDate: string | null | undefined,
+): string {
+  if (!deadline) return "";
+  return safeFormatDeadline(deadline, referenceDate || null);
 }

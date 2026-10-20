@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { TASK_STATUSES, TASK_STATUS_LABEL, type TaskStatus } from "@/components/meeting/status";
+import { TASK_STATUSES, type TaskStatus } from "@/components/meeting/status";
+import { TODO_STATUS_LABEL } from "./labels";
 import type { TodoMeeting, TodoTask } from "@/hooks/use-todo-tasks";
 import { TaskColumn } from "./TaskColumn";
 
@@ -35,7 +36,7 @@ export function KanbanBoard({
             value={s}
             className="rounded-full text-xs data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
           >
-            {TASK_STATUS_LABEL[s]} ({byStatus(s).length})
+            {TODO_STATUS_LABEL[s]} ({byStatus(s).length})
           </ToggleGroupItem>
         ))}
       </ToggleGroup>

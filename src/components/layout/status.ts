@@ -15,7 +15,7 @@ export const STATUS_LABELS: Record<KnownStatus, string> = {
   completed: "Completed",
   pending: "Pending",
   in_progress: "In progress",
-  done: "Done",
+  done: "Completed",
 };
 
 export type MeetingStatus = "live" | "upcoming" | "completed";
