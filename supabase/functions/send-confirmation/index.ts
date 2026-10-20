@@ -1,64 +1,94 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+// Sends a "meeting scheduled" confirmation to the signed-in user.
+// The recipient is always the authenticated user's own email address.
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { escapeHtml, formatPlatform, safeHttpsUrl, sendEmail } from "../_shared/email.ts";
 
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const DEFAULT_ORIGINS = ["http://localhost:8080", "http://localhost:3000", "http://localhost:5173"];
 
-serve(async (req) => {
-  // CORS for frontend invocation
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST',
-      'Access-Control-Expose-Headers': 'Content-Length, X-JSON',
-      'Access-Control-Allow-Headers': 'apikey,X-Client-Info, Content-Type, Authorization, Accept, Accept-Language, X-Authorization'
-    }});
+function allowedOrigins(): string[] {
+  const env = Deno.env.get("ALLOWED_ORIGINS");
+  const list = env
+    ? env
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean)
+    : [];
+  return list.length ? list : DEFAULT_ORIGINS;
+}
+
+function corsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin") ?? "";
+  const allowed = allowedOrigins();
+  return {
+    "Access-Control-Allow-Origin": allowed.includes(origin) ? origin : allowed[0],
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    Vary: "Origin",
+  };
+}
+
+function json(req: Request, status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders(req), "Content-Type": "application/json" },
+  });
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders(req) });
+  if (req.method !== "POST") return json(req, 405, { error: "Method not allowed." });
+
+  const authHeader = req.headers.get("Authorization") ?? "";
+  if (!authHeader.startsWith("Bearer ")) return json(req, 401, { error: "Please sign in." });
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  if (!supabaseUrl || !anonKey) return json(req, 500, { error: "Server is not configured." });
+
+  const supabase = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: authHeader } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data: userData, error: userError } = await supabase.auth.getUser(
+    authHeader.slice("Bearer ".length),
+  );
+  const email = userData?.user?.email;
+  if (userError || !email) return json(req, 401, { error: "Please sign in." });
+
+  let payload: Record<string, unknown>;
+  try {
+    payload = await req.json();
+  } catch {
+    return json(req, 400, { error: "Invalid request body." });
   }
+
+  const title = typeof payload.title === "string" ? payload.title.trim().slice(0, 200) : "";
+  if (!title) return json(req, 400, { error: "Meeting title is required." });
+
+  const when = typeof payload.time === "string" ? new Date(payload.time) : null;
+  const whenText =
+    when && !isNaN(when.getTime())
+      ? when.toLocaleString("en-GB", { dateStyle: "full", timeStyle: "short", timeZone: "UTC" }) +
+        " UTC"
+      : "Not specified";
+  const link = safeHttpsUrl(payload.link);
+
+  const html = `
+    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2>Your meeting is scheduled</h2>
+      <p>You have scheduled <strong>${escapeHtml(title)}</strong>.</p>
+      <ul style="line-height: 1.8;">
+        <li><strong>Date and time:</strong> ${escapeHtml(whenText)}</li>
+        <li><strong>Platform:</strong> ${escapeHtml(formatPlatform(payload.platform))}</li>
+        ${link ? `<li><strong>Link:</strong> <a href="${escapeHtml(link)}">${escapeHtml(link)}</a></li>` : ""}
+      </ul>
+      <p>AI Powered Meeting Companion</p>
+    </div>`;
 
   try {
-    const { email, title, time, platform, link } = await req.json();
-
-    if (!email) throw new Error("Email is required");
-
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${RESEND_API_KEY}`
-      },
-      body: JSON.stringify({
-        from: "Meeting Companion <onboarding@resend.dev>",
-        to: email,
-        subject: `Meeting Scheduled: ${title}`,
-        html: `
-          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
-            <h2 style="color: #000;">Your meeting is scheduled! 🎉</h2>
-            <p>You have successfully scheduled <strong>${title}</strong>.</p>
-            <div style="background-color: #f4f4f5; padding: 20px; border-radius: 10px; margin: 20px 0;">
-              <ul style="list-style: none; padding: 0; margin: 0; line-height: 2;">
-                <li><strong>📅 Date & Time:</strong> ${new Date(time).toLocaleString()}</li>
-                <li><strong>🎥 Platform:</strong> ${platform.replace("_", " ")}</li>
-                ${link ? `<li><strong>🔗 Link:</strong> <a href="${link}">${link}</a></li>` : ""}
-              </ul>
-            </div>
-            <p>Your AI Companion will automatically join and summarize this meeting for you. See you then!</p>
-          </div>
-        `
-      })
-    });
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error("Resend error:", errorText);
-      throw new Error(`Failed to send email: ${errorText}`);
-    }
-
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      status: 200,
-    });
-  } catch (error: any) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      status: 400,
-    });
+    await sendEmail({ to: email, subject: `Meeting scheduled: ${title}`, html });
+  } catch (err) {
+    return json(req, 502, { error: err instanceof Error ? err.message : "Email failed." });
   }
-})
+  return json(req, 200, { success: true });
+});

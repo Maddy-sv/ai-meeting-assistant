@@ -33,7 +33,22 @@
   --color-brand: var(--brand);
   --color-brand-2: var(--brand-2);
   --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-admin: var(--admin);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --font-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -44,7 +59,14 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-:root {
+/*
+ * The product is dark-only. The palette is declared on both :root and .dark so
+ * it works whether or not the `dark` class is present; __root.tsx sets
+ * class="dark" on <html> so shadcn `dark:` variants also apply.
+ */
+:root,
+.dark {
+  color-scheme: dark;
   --radius: 0.875rem;
   /* Base = deep near-black indigo */
   --background: oklch(0.16 0.03 275);
@@ -67,15 +89,32 @@
   --input: oklch(1 0 0 / 12%);
   --ring: oklch(0.68 0.19 285);
 
-  --brand: oklch(0.68 0.19 285);      /* purple */
-  --brand-2: oklch(0.66 0.17 235);    /* blue */
+  --brand: oklch(0.68 0.19 285); /* purple */
+  --brand-2: oklch(0.66 0.17 235); /* blue */
   --success: oklch(0.72 0.16 155);
+  --success-foreground: oklch(0.16 0.03 275);
   --warning: oklch(0.78 0.15 75);
+  --warning-foreground: oklch(0.16 0.03 275);
+  --info: oklch(0.66 0.17 235); /* = brand-2 */
+  --info-foreground: oklch(0.99 0 0);
+  --admin: oklch(0.72 0.17 330);
+
+  /* Opaque surfaces for panels that must not be translucent (menus, chat bubbles, etc.) */
+  --surface-1: oklch(0.19 0.03 275);
+  --surface-2: oklch(0.23 0.035 275);
+
+  /* Categorical chart palette (purple, blue, green, amber, pink) */
+  --chart-1: oklch(0.68 0.19 285);
+  --chart-2: oklch(0.66 0.17 235);
+  --chart-3: oklch(0.72 0.16 155);
+  --chart-4: oklch(0.78 0.15 75);
+  --chart-5: oklch(0.72 0.17 330);
 
   --gradient-brand: linear-gradient(135deg, oklch(0.68 0.19 285), oklch(0.62 0.18 235));
-  --gradient-hero: radial-gradient(1200px 600px at 20% 0%, oklch(0.68 0.19 285 / 0.25), transparent 60%),
-                   radial-gradient(900px 500px at 90% 20%, oklch(0.62 0.18 235 / 0.22), transparent 60%),
-                   linear-gradient(180deg, oklch(0.13 0.03 275), oklch(0.11 0.02 275));
+  --gradient-hero:
+    radial-gradient(1200px 600px at 20% 0%, oklch(0.68 0.19 285 / 0.25), transparent 60%),
+    radial-gradient(900px 500px at 90% 20%, oklch(0.62 0.18 235 / 0.22), transparent 60%),
+    linear-gradient(180deg, oklch(0.13 0.03 275), oklch(0.11 0.02 275));
   --shadow-glow: 0 20px 60px -20px oklch(0.68 0.19 285 / 0.55);
   --shadow-soft: 0 10px 30px -12px oklch(0 0 0 / 0.5);
   --glass-bg: oklch(1 0 0 / 0.04);
@@ -92,13 +131,41 @@
 }
 
 @layer base {
-  * { border-color: var(--color-border); }
-  html, body { background: var(--background); color: var(--foreground); }
+  * {
+    border-color: var(--color-border);
+  }
+  html,
   body {
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+    background: var(--background);
+    color: var(--foreground);
+  }
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
     background-image: var(--gradient-hero);
     background-attachment: fixed;
     min-height: 100vh;
+  }
+  :focus-visible {
+    outline-color: var(--ring);
+  }
+}
+
+/* Respect the user's reduced-motion preference everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
   }
 }
 
@@ -122,4 +189,21 @@
 }
 @utility shadow-soft {
   box-shadow: var(--shadow-soft);
+}
+
+/* Thin, on-brand scrollbar for scrollable panels. */
+@utility custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(1 0 0 / 0.15) transparent;
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: oklch(1 0 0 / 0.15);
+    border-radius: 9999px;
+  }
 }

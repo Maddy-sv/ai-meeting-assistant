@@ -1,175 +1,302 @@
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
-import { FolderKanban, ArrowLeft, Video, Calendar, Sparkles, Loader2, ArrowRight } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import {
+  ArrowLeft,
+  CalendarPlus,
+  FolderKanban,
+  ListChecks,
+  Loader2,
+  Pencil,
+  Sparkles,
+  Trash2,
+  Video,
+} from "lucide-react";
 import { toast } from "sonner";
-import { generateProjectSummary as genSummaryFn } from "@/lib/ai.functions";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  Section,
+  StatusBadge,
+} from "@/components/layout";
+import { ProjectFormDialog } from "@/components/projects/project-form-dialog";
+import { ScheduleMeetingDialog } from "@/components/schedule/schedule-meeting-dialog";
+import { generateProjectSummary } from "@/lib/ai.functions";
+import { platformLabel } from "@/lib/format";
+import { dataKeys, deleteProject, getProject, listProjectMeetings, updateProject } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/projects/$id")({
-  head: () => ({ meta: [{ title: "Project Dashboard — AI Powered Meeting Companion" }] }),
-  component: ProjectDashboard,
+  head: () => ({ meta: [{ title: "Project — AI Powered Meeting Companion" }] }),
+  component: ProjectPage,
 });
 
-type Project = {
-  id: string;
-  name: string;
-  description: string | null;
-  created_at: string;
-};
+interface ProjectSummary {
+  progress_report: string;
+  suggested_agenda: string[];
+  ai_enhanced?: boolean;
+}
 
-type Meeting = {
-  id: string;
-  title: string;
-  scheduled_at: string;
-  platform: string;
-  status: string;
-};
-
-function ProjectDashboard() {
+function ProjectPage() {
   const { id } = Route.useParams();
-  const [project, setProject] = useState<Project | null>(null);
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [loading, setLoading] = useState(true);
+  const navigate = Route.useNavigate();
+  const queryClient = useQueryClient();
+  const [editOpen, setEditOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [cumulativeSummary, setCumulativeSummary] = useState<any>(null);
+  const [summary, setSummary] = useState<ProjectSummary | null>(null);
 
-  async function load() {
-    setLoading(true);
-    const { data: p } = await supabase.from("projects").select("*").eq("id", id).single();
-    if (p) setProject(p as Project);
+  const project = useQuery({ queryKey: dataKeys.project(id), queryFn: () => getProject(id) });
+  const meetings = useQuery({
+    queryKey: dataKeys.projectMeetings(id),
+    queryFn: () => listProjectMeetings(id),
+  });
 
-    const { data: m } = await supabase
-      .from("meetings")
-      .select("*")
-      .eq("project_id", id)
-      .order("scheduled_at", { ascending: false });
-    
-    setMeetings((m as Meeting[]) || []);
-    
-    // Check if there is an existing cumulative summary (for now we don't save it to DB, we just generate it on the fly, or we could save it to a new table `project_summaries`. Let's just generate on fly for now)
-    setLoading(false);
+  async function save(values: { name: string; description: string | null }) {
+    await updateProject(id, values);
+    toast.success("Project saved.");
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: dataKeys.project(id) }),
+      queryClient.invalidateQueries({ queryKey: ["projects"] }),
+    ]);
   }
 
-  useEffect(() => {
-    load();
-  }, [id]);
+  async function remove() {
+    await deleteProject(id);
+    toast.success("Project deleted. Its meetings were kept.");
+    queryClient.removeQueries({ queryKey: dataKeys.project(id) });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["projects"] }),
+      queryClient.invalidateQueries({ queryKey: ["meetings"] }),
+    ]);
+    navigate({ to: "/projects" });
+  }
 
-  async function generateCumulativeSummary() {
-    if (meetings.length === 0) {
-      toast.error("Add some meetings to this project first!");
-      return;
-    }
-    
+  async function generate() {
     setGenerating(true);
     try {
-      // Call the server function
-      const data = await genSummaryFn({ data: { projectId: id } });
-      
-      setCumulativeSummary(data);
-      toast.success("Cumulative summary generated!");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to generate summary");
+      const result = (await generateProjectSummary({ data: { projectId: id } })) as ProjectSummary;
+      setSummary({
+        progress_report: result.progress_report ?? "",
+        suggested_agenda: Array.isArray(result.suggested_agenda) ? result.suggested_agenda : [],
+        ai_enhanced: result.ai_enhanced,
+      });
+      toast.success("Project summary ready.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not generate the summary.");
     } finally {
       setGenerating(false);
     }
   }
 
-  if (loading) return <p className="p-8 text-muted-foreground">Loading project...</p>;
-  if (!project) return <p className="p-8 text-red-400">Project not found.</p>;
+  const backLink = (
+    <Button asChild variant="ghost" size="sm" className="-ml-2">
+      <Link to="/projects">
+        <ArrowLeft /> All projects
+      </Link>
+    </Button>
+  );
+
+  if (project.isLoading) {
+    return (
+      <div className="space-y-6">
+        {backLink}
+        <LoadingState variant="list" rows={3} label="Loading project…" />
+      </div>
+    );
+  }
+  if (project.isError) {
+    return (
+      <div className="space-y-6">
+        {backLink}
+        <ErrorState message={project.error.message} onRetry={() => project.refetch()} />
+      </div>
+    );
+  }
+  if (!project.data) {
+    return (
+      <div className="space-y-6">
+        {backLink}
+        <EmptyState
+          icon={FolderKanban}
+          title="Project not found"
+          description="It may have been deleted, or it belongs to someone else."
+          action={
+            <Button asChild variant="brand">
+              <Link to="/projects">Back to projects</Link>
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  const p = project.data;
+  const meetingCount = meetings.data?.length ?? 0;
 
   return (
-    <div className="space-y-8 max-w-6xl mx-auto">
-      <Link to="/projects" className="inline-flex items-center text-sm text-muted-foreground hover:text-white transition-colors">
-        <ArrowLeft className="mr-2 h-4 w-4" /> Back to Projects
-      </Link>
+    <div className="space-y-8">
+      {backLink}
+      <PageHeader
+        eyebrow="Project"
+        title={p.name}
+        description={p.description || "No description yet."}
+        actions={
+          <>
+            <Button variant="glass" onClick={() => setEditOpen(true)}>
+              <Pencil /> Edit
+            </Button>
+            <ConfirmDialog
+              title={`Delete "${p.name}"?`}
+              description="The project is removed, but its meetings are kept. They just won't belong to a project any more."
+              confirmLabel="Delete project"
+              destructive
+              onConfirm={remove}
+              trigger={
+                <Button variant="ghost" className="text-destructive hover:text-destructive">
+                  <Trash2 /> Delete
+                </Button>
+              }
+            />
+          </>
+        }
+      />
 
-      <header className="glass p-8 rounded-3xl relative overflow-hidden border border-white/10">
-        <div className="absolute right-0 top-0 opacity-10 pointer-events-none">
-          <FolderKanban className="w-64 h-64 -mt-10 -mr-10 text-primary" />
-        </div>
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div>
-            <h1 className="text-4xl font-black tracking-tight mb-2">{project.name}</h1>
-            <p className="text-muted-foreground text-lg">{project.description || "No description provided."}</p>
-          </div>
-          <Button 
-            onClick={generateCumulativeSummary} 
-            disabled={generating || meetings.length === 0}
-            className="gradient-bg rounded-full shadow-glow shrink-0 text-md px-6 py-6"
+      <ProjectFormDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        mode="edit"
+        initialValues={{ name: p.name, description: p.description }}
+        onSubmit={save}
+      />
+      <ScheduleMeetingDialog
+        open={scheduleOpen}
+        onOpenChange={setScheduleOpen}
+        defaultProjectId={id}
+        title={`New meeting in ${p.name}`}
+      />
+
+      <Section
+        card
+        title="Cumulative summary"
+        description="Progress, open commitments and a suggested agenda built from every meeting in this project."
+        actions={
+          <Button
+            variant="brand"
+            onClick={generate}
+            disabled={generating || meetingCount === 0}
+            aria-describedby={meetingCount === 0 ? "summary-hint" : undefined}
           >
-            {generating ? (
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            ) : (
-              <Sparkles className="mr-2 h-5 w-5" />
-            )}
-            {generating ? "Analyzing Project History..." : "Generate Cumulative Summary"}
+            {generating ? <Loader2 className="animate-spin" /> : <Sparkles />}
+            {generating ? "Generating…" : summary ? "Regenerate" : "Generate summary"}
           </Button>
-        </div>
-      </header>
-
-      {cumulativeSummary && (
-        <section className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-          <h2 className="text-2xl font-bold flex items-center gap-2">
-            <Sparkles className="text-primary" /> AI Project Analysis
-          </h2>
-          <div className="grid md:grid-cols-2 gap-6">
-            <div className="glass p-6 rounded-2xl border border-primary/20">
-              <h3 className="text-lg font-bold mb-4 text-primary">Cumulative Progress</h3>
-              <div className="prose prose-invert max-w-none text-sm text-muted-foreground">
-                {cumulativeSummary.progress_report}
+        }
+      >
+        {meetingCount === 0 && (
+          <p id="summary-hint" className="text-sm text-muted-foreground">
+            Add at least one meeting to this project to generate a summary.
+          </p>
+        )}
+        {meetingCount > 0 && !summary && !generating && (
+          <p className="text-sm text-muted-foreground">
+            Generate a summary to see progress across all {meetingCount} meeting
+            {meetingCount === 1 ? "" : "s"}.
+          </p>
+        )}
+        {generating && !summary && (
+          <LoadingState variant="list" rows={2} label="Generating summary…" />
+        )}
+        {summary && (
+          <div className="grid gap-6 md:grid-cols-2" aria-live="polite">
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-semibold">Progress</h3>
+                <Badge variant={summary.ai_enhanced ? "info" : "muted"}>
+                  {summary.ai_enhanced ? "AI-enhanced" : "From saved records"}
+                </Badge>
               </div>
+              <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+                {summary.progress_report || "No progress recorded yet."}
+              </p>
             </div>
-            <div className="glass p-6 rounded-2xl border border-amber-500/20">
-              <h3 className="text-lg font-bold mb-4 text-amber-500">Suggested Agenda for Next Meeting</h3>
-              <ul className="space-y-3">
-                {cumulativeSummary.suggested_agenda?.map((item: string, i: number) => (
-                  <li key={i} className="flex gap-3 text-sm text-muted-foreground">
-                    <div className="h-6 w-6 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0 font-bold text-xs">
-                      {i + 1}
-                    </div>
-                    <span className="mt-0.5">{item}</span>
-                  </li>
-                ))}
-                {(!cumulativeSummary.suggested_agenda || cumulativeSummary.suggested_agenda.length === 0) && (
-                  <p className="text-sm text-muted-foreground">No specific agenda items suggested.</p>
-                )}
-              </ul>
+            <div className="space-y-2">
+              <h3 className="flex items-center gap-2 font-semibold">
+                <ListChecks className="h-4 w-4 text-primary" aria-hidden /> Suggested agenda
+              </h3>
+              {summary.suggested_agenda.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No agenda items suggested.</p>
+              ) : (
+                <ol className="space-y-2">
+                  {summary.suggested_agenda.map((item, i) => (
+                    <li key={i} className="flex gap-3 text-sm">
+                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary/15 text-xs font-bold text-primary">
+                        {i + 1}
+                      </span>
+                      <span className="pt-0.5 text-muted-foreground">{item}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
-          </div>
-        </section>
-      )}
-
-      <section className="space-y-4">
-        <h2 className="text-2xl font-bold flex items-center gap-2">
-          <Video className="text-muted-foreground" /> Project Meetings ({meetings.length})
-        </h2>
-        
-        {meetings.length === 0 ? (
-          <div className="glass rounded-2xl p-8 text-center border-dashed border-2 border-white/10">
-            <p className="text-muted-foreground">No meetings assigned to this project yet.</p>
-            <p className="text-xs text-muted-foreground mt-2">When scheduling a new meeting, select this project to link them.</p>
-          </div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {meetings.map((m) => (
-              <Link key={m.id} to={`/meetings/$id`} params={{ id: m.id }} className="glass group rounded-2xl p-5 transition-all hover:scale-[1.02] hover:bg-white/5">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-                  <Calendar className="h-4 w-4" />
-                  {new Date(m.scheduled_at).toLocaleDateString()}
-                </div>
-                <h3 className="font-bold text-lg mb-1 truncate">{m.title}</h3>
-                <div className="flex items-center justify-between mt-4">
-                  <span className="text-xs font-medium px-2 py-1 rounded bg-white/5 capitalize text-muted-foreground">
-                    {m.status}
-                  </span>
-                  <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-white transition-colors" />
-                </div>
-              </Link>
-            ))}
           </div>
         )}
-      </section>
+      </Section>
+
+      <Section
+        title={`Meetings${meetings.data ? ` (${meetingCount})` : ""}`}
+        actions={
+          <Button variant="glass" size="sm" onClick={() => setScheduleOpen(true)}>
+            <CalendarPlus /> Add meeting
+          </Button>
+        }
+      >
+        {meetings.isLoading && <LoadingState variant="list" rows={3} label="Loading meetings…" />}
+        {meetings.isError && (
+          <ErrorState message={meetings.error.message} onRetry={() => meetings.refetch()} />
+        )}
+        {meetings.data && meetingCount === 0 && (
+          <EmptyState
+            icon={Video}
+            title="No meetings in this project"
+            description="Schedule a meeting here, or pick this project when creating a meeting."
+            action={
+              <Button variant="brand" onClick={() => setScheduleOpen(true)}>
+                <CalendarPlus /> Add meeting
+              </Button>
+            }
+          />
+        )}
+        {meetings.data && meetingCount > 0 && (
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {meetings.data.map((m) => {
+              const when = m.started_at ?? m.scheduled_at;
+              return (
+                <li key={m.id}>
+                  <Link
+                    to="/meetings/$id"
+                    params={{ id: m.id }}
+                    className="glass flex h-full flex-col gap-2 rounded-2xl p-4 transition hover:shadow-glow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="min-w-0 truncate font-semibold">{m.title}</span>
+                      <StatusBadge kind="meeting" status={m.status} />
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {platformLabel(m.platform)}
+                      {when ? ` · ${format(new Date(when), "d MMM yyyy, HH:mm")}` : ""}
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Section>
     </div>
   );
 }

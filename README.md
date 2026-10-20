@@ -1,296 +1,81 @@
-# AI Powered Meeting Companion Meet AI
-
-Prompt for Loveable AI
-
-Build a modern, production-style SaaS web application called AI Powered Meeting Companion – AI-Powered Meeting Intelligence Platform.
-
-Overview
-
-AI Powered Meeting Companion is an AI-powered workspace that helps users automatically record, transcribe, summarize, organize, and search online meetings. The platform should have a clean, professional UI inspired by Notion, Slack, and Linear, with a responsive design, smooth animations, and a premium appearance.
-
----
-
-Landing Page
-
-Create a beautiful landing page that includes:
-
-- Hero section with the title:
-  "AI Powered Meeting Companion – The Complete AI Workspace for Your Meetings"
-- Subtitle explaining that AI Powered Meeting Companion automatically transcribes, summarizes, and organizes meetings.
-- Buttons:
-  - Get Started
-  - Watch Demo
-- Feature cards
-- Workflow section
-- Benefits section
-- FAQ section
-- Pricing section (Free, Pro, Enterprise)
-- Footer with Privacy Policy, Terms of Service, Contact, and Social Links.
-
----
-
-Authentication
-
-Implement authentication using Google Sign-In (OAuth).
-
-Users should be able to:
-
-- Sign Up
-- Sign In
-- Log Out
-- Reset Password
-- Edit Profile
-
----
-
-Dashboard
-
-After login, show a professional dashboard containing:
-
-- Upcoming Meetings
-- Previous Meetings
-- AI Summary Cards
-- Pending Action Items
-- Calendar Widget
-- Statistics
-  - Total Meetings
-  - Hours Saved
-  - Tasks Completed
-  - AI Summaries Generated
-
----
-
-Meeting Integration
-
-Provide options to:
-
-- Connect Google Meet
-- Connect Microsoft Teams
-- Enter a Meeting Link manually
-
-When a meeting starts:
-
-- Join as AI Assistant (UI simulation)
-- Show Recording Status
-- Show Live Transcript
-- Show Active Speakers
-- Display Recording Duration
-
----
-
-Real-Time Transcription
-
-Create a real-time transcript page.
-
-Features:
-
-- Live captions
-- Speaker labels
-- Timestamps
-- Auto-scroll
-- Pause/Resume
-- Download transcript
-
----
-
-AI Summary
-
-After the meeting ends, automatically generate:
-
-- Executive Summary
-- Key Discussion Points
-- Decisions Made
-- Risks
-- Action Items
-- Follow-up Tasks
-- Deadlines
-- Participants
-
-Display each section in beautiful cards.
-
----
-
-Meeting Memory
-
-Maintain previous meeting history.
-
-Before every meeting display:
-
-- Previous Summary
-- Pending Tasks
-- Previous Decisions
-- Suggested Agenda
-
-This should appear as an AI-generated briefing.
-
----
-
-AI Chat
-
-Create a chatbot inside the dashboard.
-
-Users can ask questions such as:
-
-- What was discussed yesterday?
-- What decisions were made?
-- Who is responsible for Task A?
-- Show meetings about authentication.
-- Show discussions related to the AI Powered Meeting Companion Dashboard.
-
-The chatbot should answer using stored meeting transcripts.
-
----
-
-Search
-
-Provide semantic search.
-
-Users can search by:
-
-- Speaker
-- Topic
-- Date
-- Keyword
-- Project
-
-Return relevant meetings with highlighted results.
-
----
-
-Email Automation
-
-After meeting completion:
-
-Generate a professional email including:
-
-- Meeting Summary
-- Action Items
-- Decisions
-- Next Steps
-
-Provide a "Send via Gmail" button.
-
----
-
-Calendar
-
-Integrate Google Calendar.
-
-Features:
-
-- Upcoming Meetings
-- Join Button
-- AI Reminder
-- Daily Agenda
-
----
-
-Notifications
-
-Create notification support for:
-
-- Meeting Started
-- Summary Ready
-- Action Item Assigned
-- Email Sent
-- Reminder Notifications
-
----
-
-User Profile
-
-Display:
-
-- Profile Picture
-- Name
-- Email
-- Company
-- Time Zone
-- Language
-- Connected Accounts
-- Subscription Plan
-
----
-
-Admin Dashboard
-
-Create an admin panel with:
-
-- Total Users
-- Active Meetings
-- AI Usage Statistics
-- Storage Usage
-- Revenue Dashboard
-- User Management
-
----
-
-Database Design
-
-Design tables for:
-
-- Users
-- Meetings
-- Participants
-- Transcripts
-- Speakers
-- AI Summaries
-- Action Items
-- Decisions
-- Emails
-- Notifications
-
----
-
-AI Architecture (UI Simulation)
-
-Prepare the application for future integration with:
-
-- Whisper API for Speech-to-Text
-- Large Language Model (OpenAI GPT/Llama/Gemini) for summarization
-- Vector Database (FAISS or Pinecone) for semantic search
-- RAG (Retrieval-Augmented Generation) for AI chat
-- Gmail API
-- Google Calendar API
-
-Use placeholder/mock data where live AI services are not connected.
-
----
-
-UI Theme
-
-Use:
-
-- Glassmorphism
-- Rounded cards
-- Soft shadows
-- Purple and blue gradients
-- Modern typography
-- Dark mode and Light mode
-- Smooth animations
-- Responsive design for desktop, tablet, and mobile
-
-The application should look like a premium SaaS product ready for real-world deployment.
-
-Generate all pages, reusable React components, routing, state management, forms, dashboards, mock APIs, and sample data so the application can be demonstrated even without connecting the actual AI services.
-
-This project was built with [Lovable](https://lovable.dev).
-
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/ccc1495e-6d55-4bb3-a28c-b974607b2273).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
-
-```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
+# AI Meeting Companion
+
+A web app that records meetings in the browser, transcribes them live, and uses Google Gemini to produce summaries, action items, decisions and pre-meeting briefings. It also keeps a "continuous meeting memory" that links tasks and decisions across meetings in the same project.
+
+Built with TanStack Start (React 19), Tailwind CSS v4 + shadcn/ui, Supabase (Postgres, Auth, Realtime, Edge Functions) and Google Gemini. Hosted through Lovable on Cloudflare Workers.
+
+## Features
+
+| Area           | What it does                                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Accounts       | Email/password sign-up with email confirmation, Google sign-in, password reset, profile and connected accounts               |
+| Meetings       | Create, schedule, search, filter and delete meetings; optional project; confirmation email when scheduling                   |
+| Live recording | Microphone transcription (Chrome/Edge) plus optional capture of a shared call tab's audio, floating mini-window              |
+| AI             | Meeting summary, action items, decisions, per-participant recaps, transcript clean-up, pre-meeting briefing, project summary |
+| Tasks          | Kanban board (pending / in progress / done) with drag-and-drop, keyboard "Move to…" menu and a phone layout                  |
+| Calendar       | Month grid (agenda list on phones), Google Calendar import                                                                   |
+| Chat           | Ask questions about your meetings; history is saved                                                                          |
+| Search         | Search across meeting titles, transcripts, summaries, tasks and decisions                                                    |
+| Notifications  | In-app bell for summaries and reminders, updated live                                                                        |
+| Admin          | Overview stats, user management (admin role, disable/enable), all meetings, AI usage                                         |
+| Demo           | "Load demo workspace" adds the research paper's two-meeting scenario to your own account                                     |
+
+## Getting started
+
+Requirements: Node.js 20+ (or Bun), a Supabase project, a Gemini API key.
+
+```bash
+npm install
+cp .env.example .env   # fill in the values
 npm run dev
 ```
+
+Then apply the database migrations and settings described in [docs/BACKEND.md](docs/BACKEND.md).
+
+### Scripts
+
+| Command             | Purpose                                |
+| ------------------- | -------------------------------------- |
+| `npm run dev`       | Start the dev server                   |
+| `npm run build`     | Production build                       |
+| `npm run typecheck` | TypeScript check                       |
+| `npm run lint`      | ESLint + Prettier check                |
+| `npm test`          | Unit tests (continuous meeting memory) |
+
+## Configuration
+
+All variable names are listed in `.env.example`; their meaning and the edge-function secrets are in [docs/BACKEND.md](docs/BACKEND.md). Never commit `.env`.
+
+## Project structure
+
+```
+src/
+  routes/                 pages (file-based routing); _authenticated/* need sign-in, admin.* need the admin role
+  components/layout/      PageHeader, EmptyState, ErrorState, LoadingState, ConfirmDialog, StatusBadge, ...
+  components/meeting/     meeting page pieces (transcript, summary, tasks, email, briefing)
+  components/todo/        task board pieces
+  components/ui/          shadcn/ui components
+  hooks/                  meeting recording, transcription, screen capture, tasks
+  lib/auth/               session, profile and admin hooks
+  lib/*.functions.ts      server functions (AI, briefing) — run on the server only
+  lib/continuous-memory.ts  cross-meeting task and decision logic (+ tests)
+  server/                 server-only helpers (Gemini client, usage limits, validation)
+supabase/
+  migrations/             database schema, security policies and RPCs
+  functions/              send-confirmation and send-reminders edge functions
+  sql/                    optional manual setup (reminder schedule)
+docs/                     backend guide and the original product brief
+```
+
+## Security notes
+
+- Every server function verifies the caller's Supabase access token and checks meeting ownership.
+- Row-level security protects all tables; admins have read-only access to other users' data and change it only through audited admin functions.
+- AI usage is logged and limited per user per day.
+
+## Documentation
+
+- [docs/BACKEND.md](docs/BACKEND.md): migrations, secrets, first admin, reminders, demo data, AI limits
+- [docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md): turning on Google sign-in and calendar import (off by default)
+- [REVAMP_PLAN.md](REVAMP_PLAN.md): audit and revamp plan
+- [docs/ORIGINAL_SPEC.md](docs/ORIGINAL_SPEC.md): the original product brief

@@ -1,99 +1,148 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
+// Scheduled job: emails hosts about meetings starting within the next 24 hours.
+// Must be called with header `x-cron-secret: <REMINDERS_CRON_SECRET>` (see
+// supabase/sql/schedule_reminders.sql). Each meeting is reminded at most once
+// (meetings.reminder_sent_at).
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { escapeHtml, formatPlatform, safeHttpsUrl, sendEmail } from "../_shared/email.ts";
 
-const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const WINDOW_HOURS = 24;
+const BATCH_LIMIT = 200;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a);
+  const eb = new TextEncoder().encode(b);
+  let diff = ea.length ^ eb.length;
+  for (let i = 0; i < Math.max(ea.length, eb.length); i++) diff |= (ea[i] ?? 0) ^ (eb[i] ?? 0);
+  return diff === 0;
+}
+
+function formatWhen(iso: string, timeZone: string | null): string {
+  const d = new Date(iso);
+  try {
+    return d.toLocaleString("en-GB", {
+      dateStyle: "full",
+      timeStyle: "short",
+      timeZone: timeZone || "UTC",
+      timeZoneName: "short",
+    });
+  } catch {
+    return (
+      d.toLocaleString("en-GB", { dateStyle: "full", timeStyle: "short", timeZone: "UTC" }) + " UTC"
+    );
+  }
+}
 
 Deno.serve(async (req) => {
-  try {
-    // 1. Calculate tomorrow's date range
-    const today = new Date()
-    const tomorrowStart = new Date(today)
-    tomorrowStart.setDate(tomorrowStart.getDate() + 1)
-    tomorrowStart.setHours(0, 0, 0, 0)
-    
-    const tomorrowEnd = new Date(today)
-    tomorrowEnd.setDate(tomorrowEnd.getDate() + 1)
-    tomorrowEnd.setHours(23, 59, 59, 999)
+  if (req.method !== "POST") return json(405, { error: "Method not allowed." });
 
-    // 2. Fetch meetings scheduled for tomorrow
-    const { data: meetings, error: meetingsError } = await supabase
-      .from('meetings')
-      .select('*')
-      .gte('scheduled_at', tomorrowStart.toISOString())
-      .lte('scheduled_at', tomorrowEnd.toISOString())
-      .neq('status', 'completed')
+  const secret = Deno.env.get("REMINDERS_CRON_SECRET");
+  const provided = req.headers.get("x-cron-secret") ?? "";
+  if (!secret || !timingSafeEqual(provided, secret)) return json(401, { error: "Unauthorized." });
 
-    if (meetingsError) throw meetingsError
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceKey) return json(500, { error: "Server is not configured." });
+  const supabase = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 
-    if (!meetings || meetings.length === 0) {
-      return new Response(JSON.stringify({ message: "No meetings scheduled for tomorrow." }), { headers: { "Content-Type": "application/json" } })
-    }
-
-    if (!RESEND_API_KEY) {
-      throw new Error("RESEND_API_KEY is not set in Edge Function secrets. Please configure it in your Supabase Dashboard.")
-    }
-
-    let sentCount = 0;
-
-    // 3. Send email for each meeting
-    for (const meeting of meetings) {
-      // Get the host's email using the Supabase Admin API
-      const { data: userAuth, error: authError } = await supabase.auth.admin.getUserById(meeting.host_id)
-      
-      const email = userAuth?.user?.email;
-      if (!email) {
-        console.warn(`No email found for host_id ${meeting.host_id}`);
-        continue;
-      }
-
-      const time = new Date(meeting.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      const platform = meeting.platform.replace("_", " ")
-
-      // Send via Resend API
-      const res = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${RESEND_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          from: 'AI Meeting Companion <onboarding@resend.dev>',
-          to: email,
-          subject: `Reminder: ${meeting.title} is tomorrow!`,
-          html: `
-            <h2>Meeting Reminder</h2>
-            <p>Hi there,</p>
-            <p>This is a reminder that you have a meeting scheduled for tomorrow.</p>
-            <ul>
-              <li><strong>Title:</strong> ${meeting.title}</li>
-              <li><strong>Time:</strong> ${time}</li>
-              <li><strong>Platform:</strong> ${platform}</li>
-            </ul>
-            ${meeting.meeting_link ? `<p><a href="${meeting.meeting_link}">Join Meeting</a></p>` : ''}
-            <p>Best regards,<br>AI Powered Meeting Companion</p>
-          `
-        })
-      })
-
-      if (res.ok) {
-        sentCount++;
-      } else {
-        console.error("Failed to send email to", email, await res.text());
-      }
-    }
-
-    return new Response(
-      JSON.stringify({ message: `Successfully sent ${sentCount} reminders.` }),
-      { headers: { "Content-Type": "application/json" } }
-    )
-
-  } catch (err: any) {
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    )
+  const now = new Date();
+  const until = new Date(now.getTime() + WINDOW_HOURS * 3600 * 1000);
+  const { data: meetings, error } = await supabase
+    .from("meetings")
+    .select("id, host_id, title, platform, meeting_link, scheduled_at")
+    .is("reminder_sent_at", null)
+    .neq("status", "completed")
+    .gte("scheduled_at", now.toISOString())
+    .lte("scheduled_at", until.toISOString())
+    .order("scheduled_at")
+    .limit(BATCH_LIMIT);
+  if (error) {
+    console.error("Failed to load meetings:", error.message);
+    return json(500, { error: "Could not load meetings." });
   }
-})
+
+  let sent = 0;
+  const failures: string[] = [];
+
+  for (const m of meetings ?? []) {
+    // Claim the meeting first so overlapping runs never send twice.
+    const { data: claimed, error: claimError } = await supabase
+      .from("meetings")
+      .update({ reminder_sent_at: new Date().toISOString() })
+      .eq("id", m.id)
+      .is("reminder_sent_at", null)
+      .select("id");
+    if (claimError) {
+      failures.push(m.id);
+      console.error("Claim failed for", m.id, claimError.message);
+      continue;
+    }
+    if (!claimed || claimed.length === 0) continue;
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("email, full_name, time_zone")
+      .eq("id", m.host_id)
+      .maybeSingle();
+    let email: string | null = profile?.email ?? null;
+    if (!email) {
+      const { data: u } = await supabase.auth.admin.getUserById(m.host_id);
+      email = u?.user?.email ?? null;
+    }
+
+    const when = formatWhen(m.scheduled_at, profile?.time_zone ?? null);
+    const link = safeHttpsUrl(m.meeting_link);
+    const name = profile?.full_name ? ` ${profile.full_name}` : "";
+
+    try {
+      if (!email) throw new Error("No email address for host");
+      await sendEmail({
+        to: email,
+        subject: `Reminder: ${String(m.title).slice(0, 150)}`,
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2>Meeting reminder</h2>
+            <p>Hi${escapeHtml(name)},</p>
+            <p>You have a meeting coming up.</p>
+            <ul style="line-height: 1.8;">
+              <li><strong>Title:</strong> ${escapeHtml(m.title)}</li>
+              <li><strong>When:</strong> ${escapeHtml(when)}</li>
+              <li><strong>Platform:</strong> ${escapeHtml(formatPlatform(m.platform))}</li>
+            </ul>
+            ${link ? `<p><a href="${escapeHtml(link)}">Join meeting</a></p>` : ""}
+            <p>AI Powered Meeting Companion</p>
+          </div>`,
+      });
+    } catch (err) {
+      // Release the claim so the next run retries this meeting.
+      await supabase.from("meetings").update({ reminder_sent_at: null }).eq("id", m.id);
+      failures.push(m.id);
+      console.error("Reminder email failed for", m.id, err instanceof Error ? err.message : err);
+      continue;
+    }
+
+    const { error: notifError } = await supabase.from("notifications").insert({
+      user_id: m.host_id,
+      type: "meeting_reminder",
+      title: `Upcoming: ${String(m.title).slice(0, 150)}`,
+      body: `Starts ${when}`,
+      link: `/meetings/${m.id}`,
+    });
+    if (notifError) console.error("Notification insert failed for", m.id, notifError.message);
+    sent++;
+  }
+
+  return json(failures.length ? 207 : 200, {
+    checked: meetings?.length ?? 0,
+    sent,
+    failed: failures.length,
+  });
+});

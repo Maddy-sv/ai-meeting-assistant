@@ -30,3 +30,20 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Supabase CLI cache
+supabase/.temp/
+
+# Python
+__pycache__/
+
+# Unrelated research-paper tooling kept locally
+paper_revision/
+
+# Local agent worktrees
+.claude/worktrees/
