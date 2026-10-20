@@ -295,7 +295,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             <div className="ml-auto flex items-center gap-1">
               <Button asChild variant="ghost" size="icon" className="rounded-full sm:hidden">
-                <Link to={"/search" as never} aria-label="Search">
+                <Link to="/search" aria-label="Search">
                   <Search className="h-4 w-4" />
                 </Link>
               </Button>
