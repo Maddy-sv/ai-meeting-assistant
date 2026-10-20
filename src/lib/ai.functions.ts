@@ -6,7 +6,7 @@ import {
   resolveDeadlineToISODate,
   safeFormatDeadline,
 } from "./continuous-memory";
-import { parseJson } from "@/server/ai/gemini";
+import { AiQuotaError, parseJson } from "@/server/ai/gemini";
 import { generateForUser } from "@/server/ai/usage";
 import {
   CLEAN_SCHEMA,
@@ -41,6 +41,7 @@ import {
   getParticipantNames,
   replaceDecisions,
   requireOwnedMeeting,
+  resolveAssignee,
   saveExtractedActionItems,
   type ActionItemRow,
   type DecisionRow,
@@ -109,6 +110,22 @@ function parseAi<S extends z.ZodTypeAny>(schema: S, text: string): z.output<S> {
   return result.data;
 }
 
+type ExtractedItem = { title: string; assignee: string | null; deadline: string | null };
+
+function withTaskDefaults(
+  items: ExtractedItem[],
+  followUps: string[],
+  hostName: string,
+): ExtractedItem[] {
+  const source =
+    items.length > 0
+      ? items
+      : followUps.map((title) => ({ title: title.slice(0, 500), assignee: null, deadline: null }));
+  return source
+    .filter((a) => a.title.trim())
+    .map((a) => ({ ...a, assignee: resolveAssignee(a.assignee, hostName) ?? hostName }));
+}
+
 type SummaryPayload = {
   executive_summary: string;
   key_points: string[];
@@ -150,23 +167,34 @@ export const summarizeMeeting = createServerFn({ method: "POST" })
       getParticipantNames(supabase, meeting.id),
     ]);
 
-    const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [
-      { text: summaryPrompt({ title: meeting.title, hostName, participants, transcript }) },
-    ];
-    for (const shot of data.screenshots ?? []) {
+    const textPart = {
+      text: summaryPrompt({ title: meeting.title, hostName, participants, transcript }),
+    };
+    const imageParts = (data.screenshots ?? []).map((shot) => {
       const { mimeType, data: b64 } = splitBase64(shot);
-      parts.push({ inlineData: { data: b64, mimeType: mimeType ?? "image/jpeg" } });
-    }
-
-    const res = await generateForUser(supabase, userId, "summarizeMeeting", {
-      contents: [{ role: "user", parts }],
-      config: {
-        systemInstruction: SUMMARY_SYSTEM,
-        responseMimeType: "application/json",
-        responseSchema: SUMMARY_SCHEMA,
-        temperature: 0.2,
-      },
+      return { inlineData: { data: b64, mimeType: mimeType ?? "image/jpeg" } };
     });
+    const summaryConfig = {
+      systemInstruction: SUMMARY_SYSTEM,
+      responseMimeType: "application/json",
+      responseSchema: SUMMARY_SCHEMA,
+      temperature: 0.2,
+    };
+
+    let res;
+    try {
+      res = await generateForUser(supabase, userId, "summarizeMeeting", {
+        contents: [{ role: "user", parts: [textPart, ...imageParts] }],
+        config: summaryConfig,
+      });
+    } catch (err) {
+      if (!(err instanceof AiQuotaError) || imageParts.length === 0) throw err;
+      console.warn("[ai] summary with screenshots hit the quota, retrying with the transcript only");
+      res = await generateForUser(supabase, userId, "summarizeMeeting", {
+        contents: [{ role: "user", parts: [textPart] }],
+        config: summaryConfig,
+      });
+    }
     const parsed = parseAi(aiSummary, res.text);
     if (!parsed.executive_summary) {
       throw new Error("The AI returned an empty summary. Please try again.");
@@ -184,9 +212,12 @@ export const summarizeMeeting = createServerFn({ method: "POST" })
     );
     if (sumErr) fail("save summary", sumErr, "Could not save the summary.");
 
-    const savedItems = await saveExtractedActionItems(supabase, meeting, parsed.action_items, {
-      hostName,
-    });
+    const savedItems = await saveExtractedActionItems(
+      supabase,
+      meeting,
+      withTaskDefaults(parsed.action_items, parsed.follow_ups, hostName),
+      { hostName },
+    );
     await replaceDecisions(supabase, meeting.id, parsed.decisions);
 
     const { error: notifErr } = await supabase.from("notifications").insert({
@@ -235,7 +266,7 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
           .order("segment_index", { ascending: true }),
         supabase
           .from("ai_summaries")
-          .select("executive_summary, key_points")
+          .select("executive_summary, key_points, follow_ups")
           .eq("meeting_id", meeting.id)
           .maybeSingle(),
       ]);
@@ -244,11 +275,8 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
 
       const transcript = transcriptText(segsRes.data);
       const summary = summaryRes.data?.executive_summary ?? "";
-      const keyPoints = Array.isArray(summaryRes.data?.key_points)
-        ? (summaryRes.data.key_points as unknown[]).filter(
-            (k): k is string => typeof k === "string",
-          )
-        : [];
+      const keyPoints = jsonStrings(summaryRes.data?.key_points);
+      const followUps = jsonStrings(summaryRes.data?.follow_ups);
       if (!transcript.trim() && !summary.trim()) {
         throw new Error("This meeting has no transcript or summary to extract tasks from.");
       }
@@ -279,10 +307,15 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
       });
       const parsed = parseAi(aiExtraction, res.text);
 
-      const action_items = await saveExtractedActionItems(supabase, meeting, parsed.action_items, {
-        hostName,
-        evidenceText: `${transcript}\n${summary}\n${keyPoints.join("\n")}`,
-      });
+      const action_items = await saveExtractedActionItems(
+        supabase,
+        meeting,
+        withTaskDefaults(parsed.action_items, followUps, hostName),
+        {
+          hostName,
+          evidenceText: `${transcript}\n${summary}\n${keyPoints.join("\n")}`,
+        },
+      );
       const decisions = await replaceDecisions(supabase, meeting.id, parsed.decisions);
       return { action_items, decisions };
     },
@@ -293,6 +326,14 @@ function assigneeNames(assignee: string | null): string[] {
     .split(/,|&|\band\b/i)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+}
+
+function isAssignedTo(assignee: string | null, participantName: string): boolean {
+  const full = participantName.trim().toLowerCase();
+  const first = full.split(/\s+/)[0];
+  return assigneeNames(assignee).some(
+    (n) => n === full || (first.length > 1 && n.split(/\s+/)[0] === first),
+  );
 }
 
 export const generateMeetingRecaps = createServerFn({ method: "POST" })
@@ -318,7 +359,7 @@ export const generateMeetingRecaps = createServerFn({ method: "POST" })
 
     return (participantsRes.data ?? []).map((p) => {
       const name = p.name.trim() || "Participant";
-      const mine = actions.filter((a) => assigneeNames(a.assignee).includes(name.toLowerCase()));
+      const mine = actions.filter((a) => isAssignedTo(a.assignee, name));
       const others = actions.filter((a) => !mine.includes(a));
       const due = (d: string | null) =>
         d ? new Date(d).toLocaleDateString("en-GB") : "no deadline";
