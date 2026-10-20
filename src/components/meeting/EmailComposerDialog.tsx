@@ -33,7 +33,6 @@ function ComposerBody({
   participants: Participant[];
   onSent: () => void;
 }) {
-  // DialogContent unmounts on close, so the form starts fresh each time it opens.
   const [to, setTo] = useState(() => participantEmails(participants).join(", "));
   const [subject, setSubject] = useState(draft.subject);
   const [body, setBody] = useState(draft.body);
@@ -125,7 +124,6 @@ function ComposerBody({
   );
 }
 
-/** Edit the recap before handing it to Gmail or the system mail app. */
 export function EmailComposerDialog({
   open,
   onOpenChange,

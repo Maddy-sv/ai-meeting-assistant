@@ -37,11 +37,10 @@ import { cn } from "@/lib/utils";
 export const BRAND_NAME = "AI Meeting Companion";
 
 interface NavItem {
-  /** A registered route path, so links are checked by the router types. */
   to: LinkProps["to"] & string;
   label: string;
   icon: LucideIcon;
-  /** Only highlight on an exact path match. */
+
   exact?: boolean;
 }
 
@@ -83,7 +82,6 @@ async function signOut(router: ReturnType<typeof useRouter>) {
   router.navigate({ to: "/auth", replace: true });
 }
 
-/** Brand mark + name used in the sidebar and mobile drawer. */
 function Brand({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <Link to="/user/dashboard" onClick={onNavigate} className="flex items-center gap-2 px-2">
@@ -132,7 +130,6 @@ function NavList({
   );
 }
 
-/** Sidebar body shared by the desktop sidebar and the mobile drawer. */
 function SidebarContent({
   pathname,
   isAdmin,
@@ -169,7 +166,6 @@ function SidebarContent({
   );
 }
 
-/** Header search: submits to /search?q=… from any page. */
 function HeaderSearch() {
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -234,7 +230,6 @@ function UserMenu() {
   );
 }
 
-/** Authenticated layout: sidebar (desktop), drawer (mobile), header with search, bell and account. */
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isAdmin = useIsAdmin();

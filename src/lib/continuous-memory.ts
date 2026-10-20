@@ -1,20 +1,3 @@
-/**
- * Continuous Meeting Memory (CMM)
- *
- * Deterministic, data-agnostic helpers that track tasks across a series of
- * meetings:
- * 1. Persisted meeting records and action items are the source of truth.
- * 2. Tasks are matched across meetings by a canonical key (stored in
- *    action_items.canonical_key, or derived from the title).
- * 3. A later meeting that confirms completion marks the reconciled task done,
- *    while each meeting's own records stay untouched.
- * 4. Pending tasks stay pending until a record or discussion confirms them.
- * 5. Decisions are deduplicated by normalised text; distinct ones are kept.
- * 6. Cumulative summaries contain only facts from the records.
- * 7. Conflicting deadlines/assignees are flagged with evidence, never
- *    silently overwritten.
- */
-
 export type TaskStatus = "pending" | "in_progress" | "done";
 
 export interface ActionItemRecord {
@@ -47,7 +30,6 @@ export interface ConflictRecord {
 }
 
 export interface ReconciledTask {
-  /** id of the most recent action_items row for this task (or the key if none) */
   id: string;
   canonical_key: string;
   title: string;
@@ -88,10 +70,6 @@ export interface CumulativeSummaryResult {
   conflicts: ConflictRecord[];
 }
 
-// ---------------------------------------------------------------------------
-// Canonical task keys
-// ---------------------------------------------------------------------------
-
 const STOPWORDS = new Set([
   "a",
   "an",
@@ -126,7 +104,6 @@ const STOPWORDS = new Set([
   "up",
 ]);
 
-/** Very small suffix stripper so "share"/"shared"/"sharing" compare equal. */
 function stem(word: string): string {
   let w = word;
   if (w.length > 5 && w.endsWith("ing")) w = w.slice(0, -3);
@@ -137,7 +114,6 @@ function stem(word: string): string {
   return w;
 }
 
-/** Significant, stemmed words of a text (used for keys and matching). */
 export function significantWords(text: string, ignore: string[] = []): string[] {
   const ignored = new Set(
     ignore
@@ -153,12 +129,6 @@ export function significantWords(text: string, ignore: string[] = []): string[] 
     .filter((w) => !ignored.has(w));
 }
 
-/**
- * Derives a stable canonical key for a task title, e.g.
- * "Finalize the project dashboard" -> "task:finalize-project-dashboard".
- * Words in `ignore` (typically participant names) are left out so the same
- * task assigned to differently-named people still matches.
- */
 export function canonicalTaskKey(title: string, ignore: string[] = []): string {
   const words = significantWords(title, ignore);
   const slug = words.join("-").slice(0, 64).replace(/-+$/, "");
@@ -169,10 +139,6 @@ function keyOf(a: ActionItemRecord, ignore: string[] = []): string {
   const stored = (a.canonical_key || "").trim();
   return stored || canonicalTaskKey(a.title, ignore);
 }
-
-// ---------------------------------------------------------------------------
-// Deadlines
-// ---------------------------------------------------------------------------
 
 const WEEKDAYS: Record<string, number> = {
   sunday: 0,
@@ -187,11 +153,6 @@ const WEEKDAYS: Record<string, number> = {
 const WEEKDAY_RE =
   /\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(\s+(morning|afternoon|evening|night))?\b/i;
 
-/**
- * Resolves a deadline ("Wednesday", "Tuesday evening", "2026-11-05", an ISO
- * timestamp) to a Date. Weekdays resolve to their next occurrence on or after
- * `referenceDate`. Returns null when the value cannot be understood.
- */
 export function resolveDeadlineToDate(
   val?: string | null,
   referenceDate?: string | Date | null,
@@ -228,7 +189,6 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** Converts a deadline to a local calendar date string YYYY-MM-DD, or null. */
 export function resolveDeadlineToISODate(
   val?: string | null,
   referenceDate?: string | Date | null,
@@ -238,7 +198,6 @@ export function resolveDeadlineToISODate(
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** Human-readable deadline, e.g. "21 Oct 2026". */
 export function safeFormatDeadline(
   val?: string | null,
   referenceDate?: string | Date | null,
@@ -254,10 +213,6 @@ export function safeFormatDeadline(
   return String(val);
 }
 
-// ---------------------------------------------------------------------------
-// Decisions
-// ---------------------------------------------------------------------------
-
 export function normalizeDecisionText(text: string): string {
   if (!text) return "";
   return text
@@ -267,7 +222,6 @@ export function normalizeDecisionText(text: string): string {
     .trim();
 }
 
-/** Removes decisions with identical normalised text; keeps distinct ones. */
 export function deduplicateDecisions<T extends DecisionRecord>(decisions: T[]): T[] {
   const seen = new Map<string, T>();
   for (const d of decisions) {
@@ -283,32 +237,22 @@ export function deduplicateDecisions<T extends DecisionRecord>(decisions: T[]): 
   return Array.from(seen.values());
 }
 
-// ---------------------------------------------------------------------------
-// Assignees
-// ---------------------------------------------------------------------------
-
 const PLACEHOLDER_ASSIGNEE =
   /^(remote( participant)?|participant( \d+)?|speaker( \d+)?|unknown|unassigned|someone|tbd|n\/a)$/i;
 
-/** True for generic speaker labels such as "Remote Participant" or "Speaker 2". */
 export function isPlaceholderAssignee(name?: string | null): boolean {
   const n = (name || "").trim();
   return !n || PLACEHOLDER_ASSIGNEE.test(n);
 }
 
-/** Trims an assignee; empty values become null. */
 export function normalizeAssignee(raw?: string | null): string | null {
   const clean = (raw || "").replace(/\s+/g, " ").trim();
   return clean || null;
 }
 
-// ---------------------------------------------------------------------------
-// Completion detection
-// ---------------------------------------------------------------------------
-
 const COMPLETION_RE =
   /\b(completed?|finished|done|shipped|delivered|wrapped up|closed|resolved|implemented|deployed|merged)\b/i;
-// Sentences that negate, defer or make completion conditional are ignored.
+
 const NEGATION_RE =
   /(\b(not|never|yet to|still|pending|in progress|remain\w*|left|outstanding|incomplete|will|shall|going to|plan to|planning to|should|need to|needs to|once|after|when|until|before|let's|lets)\b|n't\b|'ll\b)/i;
 
@@ -327,7 +271,6 @@ function mentionsTask(sentence: string, taskWords: string[]): boolean {
   return hits >= needed;
 }
 
-/** Words that describe the work itself; completion verbs are excluded. */
 function taskSubjectWords(title: string, ignore: string[] = []): string[] {
   const generic = new Set(
     significantWords(
@@ -337,10 +280,6 @@ function taskSubjectWords(title: string, ignore: string[] = []): string[] {
   return Array.from(new Set(significantWords(title, ignore).filter((w) => !generic.has(w))));
 }
 
-/**
- * Returns true if `text` contains a sentence that refers to the task and
- * states that it is complete (and is not negated or future tense).
- */
 export function confirmsCompletion(
   text: string,
   taskTitle: string,
@@ -352,7 +291,6 @@ export function confirmsCompletion(
   );
 }
 
-/** Finds a deadline phrase stated for the task in the discussion text. */
 export function deadlineMentionedFor(
   text: string,
   taskTitle: string,
@@ -387,18 +325,6 @@ function sameDeadline(a: string | null, b: string | null, ref?: string | null): 
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
-// ---------------------------------------------------------------------------
-// Reconciliation
-// ---------------------------------------------------------------------------
-
-/**
- * Reconciles tasks across meetings in chronological order.
- * - Keeps each meeting's records intact (historicalRecords).
- * - Marks a task done when a later record or discussion confirms completion.
- * - Flags deadline/assignee conflicts with evidence instead of overwriting.
- *
- * `ignoreWords` (e.g. participant names) are excluded from derived keys.
- */
 export function reconcileCrossMeetingTasks(
   meetings: MeetingRef[],
   meetingActions: Record<string, ActionItemRecord[]>,
@@ -473,7 +399,6 @@ export function reconcileCrossMeetingTasks(
         continue;
       }
 
-      // Same task seen again in a later meeting.
       if (a.id) existing.id = a.id;
       if (existing.status !== "done" && status !== "pending") {
         existing.status = status;
@@ -482,7 +407,7 @@ export function reconcileCrossMeetingTasks(
 
       if (assignee && assignee !== existing.assignee) {
         if (isPlaceholderAssignee(existing.assignee)) {
-          existing.assignee = assignee; // a real name replaces a placeholder
+          existing.assignee = assignee;
         } else if (!isPlaceholderAssignee(assignee)) {
           const conflict: ConflictRecord = {
             task_key: key,
@@ -523,7 +448,6 @@ export function reconcileCrossMeetingTasks(
       });
     }
 
-    // A later discussion may confirm a task from an earlier meeting.
     for (const task of taskMap.values()) {
       if (task.status === "done" || task.origin_meeting_id === meeting.id) continue;
       if (confirmsCompletion(contextText, task.title, ignoreWords)) {
@@ -547,10 +471,6 @@ export function reconcileCrossMeetingTasks(
   };
 }
 
-/**
- * Builds a grounded cumulative summary of a series of meetings from the
- * persisted records only.
- */
 export function buildVerifiedCumulativeSummary(
   project: { id: string; name: string },
   meetings: MeetingRef[],

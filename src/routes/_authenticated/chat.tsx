@@ -63,7 +63,7 @@ function ChatPage() {
     setPending(message);
     try {
       await askChat(message);
-      // The server saved both messages; reload the history before dropping the optimistic bubble.
+
       await queryClient.invalidateQueries({ queryKey: dataKeys.chat(userId) });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not send your message.");

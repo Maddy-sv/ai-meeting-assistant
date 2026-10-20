@@ -2,14 +2,12 @@ import { queryOptions } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { isAdmin, type ProfileRow } from "@/lib/rpc";
 
-/** React Query keys for auth-derived data. Everything under `auth` is per user. */
 export const authKeys = {
   all: ["auth"] as const,
   profile: (userId: string) => ["auth", "profile", userId] as const,
   isAdmin: (userId: string) => ["auth", "is-admin", userId] as const,
 };
 
-/** The signed-in user's `profiles` row (null if it has not been created yet). */
 export function profileQueryOptions(userId: string) {
   return queryOptions({
     queryKey: authKeys.profile(userId),
@@ -26,7 +24,6 @@ export function profileQueryOptions(userId: string) {
   });
 }
 
-/** Whether the signed-in user is an admin. Any failure is treated as "not an admin". */
 export function isAdminQueryOptions(userId: string) {
   return queryOptions({
     queryKey: authKeys.isAdmin(userId),

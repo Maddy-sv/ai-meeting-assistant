@@ -1,4 +1,3 @@
-/** Formats a duration in seconds as "45m" or "1h 5m". Returns "0m" for empty values. */
 export function formatDuration(seconds: number | null | undefined): string {
   const s = seconds ?? 0;
   const m = Math.round(s / 60);
@@ -6,7 +5,6 @@ export function formatDuration(seconds: number | null | undefined): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
-/** Meeting platforms the app can create. */
 export const MEETING_PLATFORMS = [
   { value: "google_meet", label: "Google Meet" },
   { value: "teams", label: "Microsoft Teams" },
@@ -15,14 +13,12 @@ export const MEETING_PLATFORMS = [
 
 export type MeetingPlatform = (typeof MEETING_PLATFORMS)[number]["value"];
 
-/** Human-readable platform name for `meetings.platform`. */
 export function platformLabel(platform: string | null | undefined): string {
   const known = MEETING_PLATFORMS.find((p) => p.value === platform);
   if (known) return known.label;
   return platform ? platform.replace(/_/g, " ") : "Unknown";
 }
 
-/** Returns the URL only when it is a valid http(s) link, so it is safe to put in `href`. */
 export function safeExternalUrl(link: string | null | undefined): string | null {
   if (!link) return null;
   try {

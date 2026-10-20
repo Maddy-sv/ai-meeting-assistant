@@ -1,5 +1,3 @@
-// Shared helpers for the email edge functions.
-
 export const DEFAULT_EMAIL_FROM = "AI Meeting Companion <onboarding@resend.dev>";
 
 export function escapeHtml(value: unknown): string {
@@ -11,7 +9,6 @@ export function escapeHtml(value: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
-/** Returns the URL if it is a valid https link, otherwise null. */
 export function safeHttpsUrl(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
   try {

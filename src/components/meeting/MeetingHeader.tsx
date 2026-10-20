@@ -100,7 +100,7 @@ export function MeetingHeader({
   onOpenPip: () => void;
   onShareEmail: () => void;
   onSaveLink: (link: string) => Promise<boolean>;
-  /** Hide every control that would change the meeting (viewer is not the host). */
+
   readOnly?: boolean;
 }) {
   const router = useRouter();

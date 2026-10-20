@@ -31,10 +31,6 @@ export type LiveTranscriptionSupport = "checking" | "supported" | "unsupported";
 
 export type StartResult = { ok: true } | { ok: false; reason: string };
 
-/**
- * Microphone transcription with the browser's Web Speech API (Chrome and Edge).
- * `support` is "unsupported" in browsers without the API so the UI can explain why.
- */
 export function useLiveTranscription(options: {
   onFinalText: (text: string) => void;
   onFatalError?: (message: string) => void;
@@ -64,9 +60,7 @@ export function useLiveTranscription(options: {
   const safeStart = (rec: SpeechRecognitionLike) => {
     try {
       rec.start();
-    } catch {
-      // start() throws if recognition is already running; that is fine.
-    }
+    } catch {}
   };
 
   const stop = useCallback(() => {
@@ -79,9 +73,7 @@ export function useLiveTranscription(options: {
       rec.onresult = null;
       try {
         rec.stop();
-      } catch {
-        // already stopped
-      }
+      } catch {}
     }
     recognitionRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -135,7 +127,6 @@ export function useLiveTranscription(options: {
       }
     };
     rec.onend = () => {
-      // Chrome ends recognition after silence; restart while the session is active.
       if (activeRef.current && !pausedRef.current) safeStart(rec);
     };
 
@@ -162,15 +153,12 @@ export function useLiveTranscription(options: {
       interimRef.current = "";
       try {
         rec.stop();
-      } catch {
-        // already stopped
-      }
+      } catch {}
     } else {
       safeStart(rec);
     }
   }, []);
 
-  /** Returns and clears any words that were heard but not yet finalised. */
   const takeInterim = useCallback(() => {
     const text = interimRef.current.trim();
     interimRef.current = "";

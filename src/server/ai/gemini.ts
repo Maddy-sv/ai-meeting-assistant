@@ -1,11 +1,5 @@
 import { GoogleGenAI, type GenerateContentConfig, type ContentListUnion } from "@google/genai";
 
-/**
- * Single place that decides which Gemini model is used.
- * - GEMINI_MODEL overrides the default model.
- * - GEMINI_FALLBACK_MODEL overrides the one fallback (set it to "none" to disable).
- * Every call has an overall deadline so a request never hangs the server.
- */
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
 export const DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 export const AI_CALL_DEADLINE_MS = 25_000;
@@ -32,7 +26,7 @@ function getClient(): GoogleGenAI {
 export interface GenerateOptions {
   contents: ContentListUnion;
   config?: Omit<GenerateContentConfig, "abortSignal">;
-  /** Preferred model for this call; the configured fallback still applies. */
+
   model?: string;
   deadlineMs?: number;
 }
@@ -57,11 +51,6 @@ function classify(err: unknown): Failure {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * Calls Gemini with the configured model and at most one fallback model,
- * retrying a transient error once per model, all within one overall deadline.
- * Throws a user-friendly Error when no model produced a response.
- */
 export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
   const ai = getClient();
   const deadline = Date.now() + (opts.deadlineMs ?? AI_CALL_DEADLINE_MS);
@@ -98,7 +87,7 @@ export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
           await sleep(RETRY_DELAY_MS);
           continue;
         }
-        break; // quota / not found / other / second transient failure -> next model
+        break;
       } finally {
         clearTimeout(timer);
       }
@@ -111,7 +100,6 @@ export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
   throw new Error("The AI service is unavailable right now. Please try again in a minute.");
 }
 
-/** Parses a JSON response; throws a friendly error on malformed output. */
 export function parseJson(text: string): unknown {
   const cleaned = text
     .trim()

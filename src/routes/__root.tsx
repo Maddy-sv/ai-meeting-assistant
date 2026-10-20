@@ -94,8 +94,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:card", content: "summary_large_image" },
     ],
     links: [
-      // Inter is loaded from Google Fonts with display=swap; the CSS font stack falls back to
-      // the system UI font while it loads (or if it is blocked), so SSR output is unaffected.
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {

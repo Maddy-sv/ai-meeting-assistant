@@ -9,10 +9,6 @@ import type { MeetingData } from "./use-meeting-data";
 
 export type NewParticipantInput = { name: string; email: string; role: string };
 
-/**
- * Edits to the transcript, participants and meeting link. Changes are applied
- * optimistically and rolled back when the database rejects them.
- */
 export function useMeetingTranscriptEdits(data: MeetingData) {
   const {
     meetingId,
@@ -41,7 +37,6 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
     }
   }
 
-  /** Splits a multi-line message: the first line stays in place, the rest become new rows. */
   async function splitMessage(transcriptId: string) {
     const target = transcripts.find((t) => t.id === transcriptId);
     if (!target) return;
@@ -75,7 +70,6 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
     }
     const { error: insErr } = await supabase.from("transcripts").insert(extra);
     if (insErr) {
-      // Restore the original text so nothing is lost.
       await supabase.from("transcripts").update({ content: target.content }).eq("id", transcriptId);
       toast.error(insErr.message || "Could not split the message.");
       return;
@@ -147,7 +141,6 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
     return true;
   }
 
-  /** Renames a participant and every transcript line attributed to the old name. */
   async function renameParticipant(participant: Participant, newName: string) {
     const name = newName.trim();
     if (!name || name === participant.name) return;
@@ -161,7 +154,7 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
       await supabase.from("participants").update({ name }).eq("id", participant.id).select("id"),
       "Could not rename the participant.",
     );
-    // A participant may have no transcript lines yet, so zero rows is fine here.
+
     const { error: tErr } = pProblem
       ? { error: null }
       : await supabase

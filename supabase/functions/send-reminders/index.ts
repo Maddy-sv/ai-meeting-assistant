@@ -1,7 +1,3 @@
-// Scheduled job: emails hosts about meetings starting within the next 24 hours.
-// Must be called with header `x-cron-secret: <REMINDERS_CRON_SECRET>` (see
-// supabase/sql/schedule_reminders.sql). Each meeting is reminded at most once
-// (meetings.reminder_sent_at).
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { escapeHtml, formatPlatform, safeHttpsUrl, sendEmail } from "../_shared/email.ts";
 
@@ -73,7 +69,6 @@ Deno.serve(async (req) => {
   const failures: string[] = [];
 
   for (const m of meetings ?? []) {
-    // Claim the meeting first so overlapping runs never send twice.
     const { data: claimed, error: claimError } = await supabase
       .from("meetings")
       .update({ reminder_sent_at: new Date().toISOString() })
@@ -122,7 +117,6 @@ Deno.serve(async (req) => {
           </div>`,
       });
     } catch (err) {
-      // Release the claim so the next run retries this meeting.
       await supabase.from("meetings").update({ reminder_sent_at: null }).eq("id", m.id);
       failures.push(m.id);
       console.error("Reminder email failed for", m.id, err instanceof Error ? err.message : err);

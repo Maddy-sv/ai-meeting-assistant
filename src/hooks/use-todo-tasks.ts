@@ -55,11 +55,6 @@ function extractRow(res: unknown): RawTask | null {
   return null;
 }
 
-/**
- * The signed-in user's tasks: every action item from meetings they host, plus items
- * assigned to them in other meetings. The database is the only source of truth;
- * realtime keeps the board in sync with meeting pages and other tabs.
- */
 export function useTodoTasks() {
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState("");
@@ -99,8 +94,6 @@ export function useTodoTasks() {
       setMeetings(meetingList);
       meetingIdsRef.current = new Set(meetingList.map((m) => m.id));
 
-      // Join on the meeting and filter by host in the database, so the request
-      // does not grow with the number of meetings.
       const own = await supabase
         .from("action_items")
         .select("*, meetings!inner(host_id)")
@@ -108,7 +101,6 @@ export function useTodoTasks() {
         .order("created_at", { ascending: false });
       if (own.error) throw new Error(own.error.message);
 
-      // Items other hosts assigned to this user (visible through the assignee RLS policy).
       const assigned = await supabase
         .from("action_items")
         .select("*")

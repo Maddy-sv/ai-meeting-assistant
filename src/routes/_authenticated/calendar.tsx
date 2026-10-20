@@ -111,7 +111,6 @@ function CalendarPage() {
     (m) => normalizeMeetingStatus(m.status) !== "completed",
   ).length;
 
-  // Agenda (small screens): meetings in the visible month grouped by day.
   const agenda = useMemo(() => {
     const groups = new Map<string, { day: Date; items: typeof scheduled }>();
     for (const m of scheduled) {
@@ -333,7 +332,6 @@ function CalendarPage() {
 
         {meetings.data && (
           <>
-            {/* Month grid: tablets and up */}
             <div className="glass hidden overflow-hidden rounded-3xl md:block">
               <div className="grid grid-cols-7 border-b border-border bg-surface-1">
                 {WEEKDAYS.map((d) => (
@@ -396,7 +394,6 @@ function CalendarPage() {
               </div>
             </div>
 
-            {/* Agenda list: phones */}
             <div className="md:hidden">
               {agenda.length === 0 ? (
                 <EmptyState

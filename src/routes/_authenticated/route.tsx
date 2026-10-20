@@ -13,7 +13,6 @@ export const Route = createFileRoute("/_authenticated")({
       throw redirect({ to: "/auth", search: { redirect: location.href } });
     }
 
-    // Disabled accounts (profiles.is_active = false) are signed out immediately.
     const profile = await context.queryClient
       .fetchQuery(profileQueryOptions(session.user.id))
       .catch(() => null);

@@ -18,7 +18,6 @@ import type { MeetingData } from "./use-meeting-data";
 export type NewTaskInput = { title: string; assignee: string; deadline: string };
 export type NewDecisionInput = { description: string; madeBy: string };
 
-/** Accepts both `{ task }` and a bare row from createActionItemServer. */
 function extractCreatedRow(res: unknown): ActionItem | null {
   if (!res || typeof res !== "object") return null;
   const maybe = (res as { task?: unknown }).task ?? res;
@@ -28,10 +27,6 @@ function extractCreatedRow(res: unknown): ActionItem | null {
   return null;
 }
 
-/**
- * Task, decision and AI actions for one meeting. Every mutation reports success or
- * failure with a toast, and optimistic changes are rolled back if the server rejects them.
- */
 export function useMeetingTasks(data: MeetingData) {
   const { meetingId, actions, setActions, setDecisions, reload } = data;
   const summarizeFn = useServerFn(summarizeMeeting);

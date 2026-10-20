@@ -313,7 +313,7 @@ describe("Assignees", () => {
 });
 
 describe("Deadline resolution", () => {
-  const ref = "2026-10-16T10:00:00Z"; // a Friday
+  const ref = "2026-10-16T10:00:00Z";
 
   it("turns weekday names into calendar dates", () => {
     assert.strictEqual(safeFormatDeadline("Wednesday", ref), "21 Oct 2026");

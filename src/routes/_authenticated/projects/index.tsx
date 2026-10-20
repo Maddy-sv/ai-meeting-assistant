@@ -27,7 +27,7 @@ function ProjectsPage() {
     queryFn: () => listProjects(userId),
     enabled: !!user,
   });
-  // Used only for per-project meeting counts; the list still renders if it fails.
+
   const meetings = useQuery({
     queryKey: dataKeys.myMeetings(userId),
     queryFn: () => listMyMeetings(userId),

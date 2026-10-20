@@ -10,7 +10,6 @@ import type {
   Transcript,
 } from "./types";
 
-/** Returns the message of a thrown server error, or a fallback. */
 export function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === "string" && err) return err;
@@ -23,12 +22,6 @@ export function errorMessage(err: unknown, fallback: string): string {
 
 export const NO_PERMISSION_MESSAGE = "You don't have permission to change this meeting.";
 
-/**
- * Checks the result of an update or delete that ended with `.select("id")`.
- * Row-level security silently skips rows the caller may not change, so zero
- * affected rows is reported as a permission problem instead of a success.
- * Returns an error message, or null when at least one row changed.
- */
 export function mutationError(
   res: { data: unknown[] | null; error: { message?: string } | null },
   fallback: string,
@@ -66,7 +59,6 @@ export function formatDuration(totalSeconds: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
 }
 
-/** Summary list columns are JSONB; accept arrays or a single string. */
 export function toStringList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).filter(Boolean);
@@ -90,7 +82,6 @@ const SPEAKER_TONES = [
   "bg-chart-5/20 text-chart-5",
 ];
 
-/** Stable avatar colour per speaker, from the chart tokens. The host always uses primary. */
 export function speakerTone(name: string | null | undefined, isHost: boolean): string {
   if (isHost) return "bg-primary/20 text-primary";
   const str = (name || "").toLowerCase().trim();
@@ -149,7 +140,6 @@ export function downloadTextFile(filename: string, text: string) {
 
 const RULE = "----------------------------------------";
 
-/** Builds a plain-text recap email from real meeting data only. */
 export function buildMeetingEmail(
   meeting: Meeting | null,
   summary: Summary | null,

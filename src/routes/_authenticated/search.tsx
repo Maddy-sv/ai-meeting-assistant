@@ -45,7 +45,6 @@ function SearchPage() {
   const [input, setInput] = useState(q);
   const lastPushed = useRef(q);
 
-  // Follow external changes to ?q (e.g. the header search box), but not our own updates.
   useEffect(() => {
     if (q !== lastPushed.current) {
       lastPushed.current = q;
@@ -53,7 +52,6 @@ function SearchPage() {
     }
   }, [q]);
 
-  // Push the typed text to the URL after a short pause.
   useEffect(() => {
     const value = input.trim();
     if (value === lastPushed.current) return;
@@ -214,7 +212,6 @@ function ResultRow({
   );
 }
 
-/** Wraps case-insensitive matches of `term` in <mark>, without using HTML strings. */
 function Highlight({ text, term }: { text: string; term: string }) {
   const needle = term.toLowerCase();
   if (!needle) return <>{text}</>;

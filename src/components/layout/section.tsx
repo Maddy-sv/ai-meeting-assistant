@@ -4,15 +4,14 @@ import { cn } from "@/lib/utils";
 export interface SectionProps {
   title?: ReactNode;
   description?: ReactNode;
-  /** Controls shown at the right of the section heading. */
+
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
-  /** Render the body inside a glass card. Defaults to false. */
+
   card?: boolean;
 }
 
-/** A titled block of page content with consistent `space-y-4` rhythm. */
 export function Section({ title, description, actions, children, className, card }: SectionProps) {
   return (
     <section className={cn("space-y-4", className)}>

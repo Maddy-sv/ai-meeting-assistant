@@ -3,14 +3,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { useUser } from "@/lib/auth";
 import type { NotificationRow } from "@/lib/rpc";
 
-/** React Query keys for the signed-in user's notifications. Invalidate `all(uid)` after changes. */
 export const notificationKeys = {
   all: (userId: string) => ["notifications", userId] as const,
   latest: (userId: string) => ["notifications", userId, "latest"] as const,
   unread: (userId: string) => ["notifications", userId, "unread"] as const,
 };
 
-/** Latest 20 notifications for the signed-in user, newest first. */
 export function useLatestNotifications() {
   const user = useUser();
   const userId = user?.id ?? "";
@@ -30,7 +28,6 @@ export function useLatestNotifications() {
   });
 }
 
-/** Number of unread notifications for the signed-in user. */
 export function useUnreadNotificationCount() {
   const user = useUser();
   const userId = user?.id ?? "";
@@ -49,7 +46,6 @@ export function useUnreadNotificationCount() {
   });
 }
 
-/** Only follow in-app links stored on notifications (same-origin relative paths). */
 export function isSafeInternalLink(link: string | null | undefined): link is string {
   return !!link && link.startsWith("/") && !link.startsWith("//") && !link.startsWith("/\\");
 }

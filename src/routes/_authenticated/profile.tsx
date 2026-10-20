@@ -68,9 +68,7 @@ function supportedTimeZones(): string[] {
     const intl = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };
     const zones = intl.supportedValuesOf?.("timeZone");
     if (zones && zones.length > 0) return zones.includes("UTC") ? zones : ["UTC", ...zones];
-  } catch {
-    // Older browsers: use the short list below.
-  }
+  } catch {}
   return FALLBACK_TIME_ZONES;
 }
 
@@ -188,7 +186,7 @@ function ProfileDetails({ profile }: { profile: ProfileRow | null }) {
       toast.error("Could not save your profile. Please try again.");
       return;
     }
-    // Keep the auth metadata in sync so the header shows the new name straight away.
+
     const { error: metaError } = await supabase.auth.updateUser({
       data: { full_name: values.full_name, name: values.full_name },
     });

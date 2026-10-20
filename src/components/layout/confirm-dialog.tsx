@@ -18,20 +18,16 @@ export interface ConfirmDialogProps {
   description?: ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
-  /** Red confirm button for destructive actions. */
+
   destructive?: boolean;
-  /**
-   * Runs when the user confirms. The dialog stays open with a spinner until the
-   * promise settles; it closes on success and shows `toast.error(message)` if it throws.
-   */
+
   onConfirm: () => Promise<unknown> | unknown;
-  /** Element that opens the dialog (rendered with `asChild`). Omit when controlling `open`. */
+
   trigger?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
 
-/** Accessible confirmation dialog (replaces `window.confirm`) with an async pending state. */
 export function ConfirmDialog({
   title,
   description,

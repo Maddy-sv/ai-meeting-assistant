@@ -9,16 +9,11 @@ import type { MeetingData } from "./use-meeting-data";
 import { useLiveTranscription } from "./use-meeting-live-transcription";
 import { useScreenShareCapture } from "./use-meeting-screen-capture";
 
-/** Mic speech heard while the shared tab is playing sound is attributed to the remote side. */
 const REMOTE_OVERLAP_MS = 4_500;
 const REMOTE_FALLBACK_LABEL = "Remote participant";
 
 type RemoteSegment = { speaker: string; content: string; spoken_at?: string };
 
-/**
- * One recording session: microphone transcription, optional tab/screen audio capture,
- * persistence of every segment, and the meeting status lifecycle.
- */
 export function useMeetingRecording(
   data: MeetingData,
   onEnded: (screenshots: string[]) => Promise<unknown>,
@@ -27,7 +22,7 @@ export function useMeetingRecording(
   const transcribeRemote = useServerFn(transcribeRemoteAudio);
   const [ending, setEnding] = useState(false);
   const segmentRef = useRef(0);
-  /** Transcript writes still in flight; ending the meeting waits for them. */
+
   const pendingRef = useRef(new Set<Promise<unknown>>());
   const dataRef = useRef(data);
   useEffect(() => {
@@ -109,7 +104,7 @@ export function useMeetingRecording(
         for (const seg of res) {
           if (seg.content?.trim()) await persistSegment(seg.speaker, seg.content.trim());
         }
-        // The server registers newly heard speakers as participants.
+
         await dataRef.current.reloadParticipants();
       } catch (err) {
         toast.error(errorMessage(err, "Remote audio could not be transcribed."), {
@@ -162,7 +157,6 @@ export function useMeetingRecording(
     toast.success("Sharing started. Remote voices from the shared tab will be transcribed.");
   }
 
-  /** Stops both captures and resolves once the last audio clip has been handed off. */
   function stopCapture(): Promise<unknown> {
     live.stop();
     return screen.stop();
@@ -175,7 +169,7 @@ export function useMeetingRecording(
       const pending = live.takeInterim();
       if (pending) void track(persistSegment(hostName, pending));
       const duration = live.elapsed;
-      // Wait for the final tab-audio clip and every transcript write before ending.
+
       await stopCapture();
       await settlePending();
       const endedAt = new Date().toISOString();

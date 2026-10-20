@@ -59,7 +59,6 @@ interface DashboardData {
 const dashboardKey = (userId: string) => ["user-dashboard", userId] as const;
 
 async function loadDashboard(userId: string): Promise<DashboardData> {
-  // Only the user's own meetings (admins can read everyone's through RLS, so filter explicitly).
   const { data: meetings, error } = await supabase
     .from("meetings")
     .select(
@@ -69,7 +68,6 @@ async function loadDashboard(userId: string): Promise<DashboardData> {
     .order("scheduled_at", { ascending: true, nullsFirst: false });
   if (error) throw new Error("Could not load your meetings.");
 
-  // Both queries filter in the database, so no list of meeting ids is sent in the URL.
   const [summaries, tasks] = await Promise.all([
     supabase
       .from("ai_summaries")
@@ -416,7 +414,6 @@ function UpcomingCard({ meeting: m }: { meeting: MeetingRow }) {
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
-              {/* Disabled buttons don't receive hover/focus, so the span carries the tooltip. */}
               <span tabIndex={0} className="flex-1 rounded-full">
                 <Button variant="brand" size="sm" className="w-full" disabled>
                   <ExternalLink /> Join

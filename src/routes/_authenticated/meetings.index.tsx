@@ -117,7 +117,6 @@ function MeetingsList() {
     .filter((m) => normalizeMeetingStatus(m.status) === "completed")
     .sort((a, b) => meetingTime(b).localeCompare(meetingTime(a)));
 
-  // Only keep selections that are still visible.
   const visibleIds = new Set(filtered.map((m) => m.id));
   const selectedVisible = [...selected].filter((id) => visibleIds.has(id));
   const allVisibleSelected = filtered.length > 0 && selectedVisible.length === filtered.length;

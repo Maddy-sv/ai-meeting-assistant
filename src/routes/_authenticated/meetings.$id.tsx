@@ -115,9 +115,9 @@ function MeetingDetail() {
 
   const meetingStatus = normalizeMeetingStatus(meeting.status);
   const completed = meetingStatus === "completed";
-  // Before the meeting starts the briefing is shown up front; afterwards it is a tab.
+
   const upcoming = meetingStatus === "upcoming" && !recording.live;
-  // Admins can open other users' meetings; RLS only lets the host change them.
+
   const readOnly = meeting.host_id !== data.currentUserId;
   const activeTab = tab ?? (completed ? "summary" : "transcript");
   const hasTranscript = transcripts.length > 0;

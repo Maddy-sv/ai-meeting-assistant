@@ -4,10 +4,6 @@ import { TASK_STATUSES, TASK_STATUS_LABEL, type TaskStatus } from "@/components/
 import type { TodoMeeting, TodoTask } from "@/hooks/use-todo-tasks";
 import { TaskColumn } from "./TaskColumn";
 
-/**
- * Three columns from the md breakpoint up. On phones a segmented control picks which
- * single column is shown, and tasks move with each card's "Move to…" menu.
- */
 export function KanbanBoard({
   tasks,
   meetingsById,

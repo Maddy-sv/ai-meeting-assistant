@@ -14,7 +14,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type { Transcript } from "./types";
 
-/** Paste or edit the whole transcript; the server cleans it and re-attributes speakers. */
 export function EditTranscriptDialog({
   transcripts,
   cleaning,

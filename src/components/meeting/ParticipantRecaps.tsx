@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import type { MeetingTasks } from "@/hooks/use-meeting-tasks";
 import { copyText, openInGmail, openInMailApp } from "./utils";
 
-/** Personal recaps per participant, generated on demand from the meeting's real tasks. */
 export function ParticipantRecaps({
   tasks,
   hasSummary,

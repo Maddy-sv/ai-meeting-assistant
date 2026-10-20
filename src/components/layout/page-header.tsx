@@ -4,14 +4,13 @@ import { cn } from "@/lib/utils";
 export interface PageHeaderProps {
   title: ReactNode;
   description?: ReactNode;
-  /** Small uppercase label above the title. */
+
   eyebrow?: ReactNode;
-  /** Buttons rendered on the right (wraps below the title on small screens). */
+
   actions?: ReactNode;
   className?: string;
 }
 
-/** Standard page title block: eyebrow, `text-3xl` title, description and actions. */
 export function PageHeader({ title, description, eyebrow, actions, className }: PageHeaderProps) {
   return (
     <header

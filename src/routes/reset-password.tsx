@@ -37,7 +37,6 @@ type Values = z.infer<typeof schema>;
 
 type Status = "checking" | "ready" | "invalid";
 
-/** Reads an error Supabase appended to the link (e.g. `#error_code=otp_expired`). */
 function linkError(): string | null {
   const params = new URLSearchParams(
     window.location.hash.replace(/^#/, "") || window.location.search.replace(/^\?/, ""),
@@ -61,11 +60,10 @@ function ResetPassword() {
 
     function evaluate(hasSession: boolean) {
       if (!mounted) return;
-      // Only a session created by a password-recovery link may use this form.
+
       setStatus(hasSession && hasRecoverySession() ? "ready" : "invalid");
     }
 
-    // getSession waits for Supabase to finish parsing the recovery link in the URL.
     supabase.auth.getSession().then(({ data }) => evaluate(!!data.session));
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "PASSWORD_RECOVERY") evaluate(!!session);
@@ -94,7 +92,7 @@ function ResetPassword() {
       return;
     }
     clearRecoverySession();
-    // Sign out every other device that might be using the old password.
+
     const { error: signOutError } = await supabase.auth.signOut({ scope: "others" });
     if (signOutError) console.error("[auth] could not sign out other sessions", signOutError);
     toast.success("Password updated. Other devices have been signed out.");

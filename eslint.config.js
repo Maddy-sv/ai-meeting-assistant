@@ -34,11 +34,10 @@ export default tseslint.config(
       ],
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "@typescript-eslint/no-unused-vars": "off",
+      "no-empty": ["error", { allowEmptyCatch: true }],
     },
   },
   {
-    // Generated shadcn/ui primitives export their variant helpers and hooks next to
-    // the components by design; splitting them only for fast refresh is not worth it.
     files: ["src/components/ui/**/*.tsx"],
     rules: { "react-refresh/only-export-components": "off" },
   },

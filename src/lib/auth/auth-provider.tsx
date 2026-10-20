@@ -6,12 +6,6 @@ import { AuthContext, type AuthState } from "./context";
 import { authKeys } from "./queries";
 import { clearLocalAppData, consumePostAuthRedirect } from "./storage";
 
-/**
- * Single subscription to Supabase auth events for the whole app.
- * - keeps the session in React state (read it with `useSession`/`useUser`);
- * - on sign-out clears the React Query cache and local "ai_*" caches;
- * - re-runs route guards whenever the user changes.
- */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -28,7 +22,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!mounted) return;
       setState({ session, loading: false });
 
-      // Defer side effects: calling Supabase from inside this callback can deadlock.
       setTimeout(() => {
         if (event === "SIGNED_OUT") {
           queryClient.clear();

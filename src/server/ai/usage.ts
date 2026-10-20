@@ -8,11 +8,6 @@ export const DAILY_LIMIT_MESSAGE = "Daily AI limit reached. Try again tomorrow."
 export const TRANSCRIBE_LIMIT_MESSAGE =
   "Daily transcription limit reached. Live transcription will resume tomorrow.";
 
-/**
- * Functions that run on short audio clips many times per meeting. They have
- * their own daily cap so they cannot use up the general AI allowance that the
- * end-of-meeting summary depends on.
- */
 export const TRANSCRIPTION_FNS = ["transcribeRemoteAudio"] as const;
 
 function isTranscriptionFn(fn: string): boolean {
@@ -37,11 +32,6 @@ function startOfUtcDay(): string {
   return d.toISOString();
 }
 
-/**
- * Throws when the user has used up today's requests for this kind of call.
- * Transcription calls are counted against their own cap; every other call is
- * counted against the general AI_DAILY_LIMIT.
- */
 export async function assertWithinDailyLimit(
   supabase: Client,
   userId: string,
@@ -78,14 +68,10 @@ async function recordUsage(
     ok: row.ok,
     duration_ms: Math.round(row.durationMs),
   });
-  // Logging must not turn a successful AI answer into a failure, but it is reported.
+
   if (error) console.error("[ai] failed to record usage:", error.message);
 }
 
-/**
- * Runs one Gemini call for a user: checks the daily limit, calls the model and
- * records the outcome in ai_usage. Errors are re-thrown unchanged.
- */
 export async function generateForUser(
   supabase: Client,
   userId: string,

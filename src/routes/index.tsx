@@ -160,7 +160,6 @@ function Landing() {
   const { session } = useSession();
   return (
     <div className="min-h-screen">
-      {/* Nav */}
       <header className="sticky top-0 z-30 border-b border-border backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-4 lg:px-8">
           <Link to="/" className="flex min-w-0 items-center gap-2">
@@ -209,7 +208,6 @@ function Landing() {
         </div>
       </header>
 
-      {/* Hero */}
       <section className="relative mx-auto max-w-7xl px-4 pb-20 pt-16 lg:px-8 lg:pt-28">
         <div className="mx-auto max-w-4xl text-center">
           <div className="glass mx-auto mb-6 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs">
@@ -237,7 +235,6 @@ function Landing() {
           </div>
         </div>
 
-        {/* Hero preview */}
         <div className="glass mx-auto mt-16 max-w-5xl overflow-hidden rounded-3xl p-2 shadow-soft">
           <div className="rounded-2xl border border-border bg-surface-1/60 p-4 sm:p-6">
             <div className="mb-4 flex items-center gap-2">
@@ -277,7 +274,6 @@ function Landing() {
         </div>
       </section>
 
-      {/* Features */}
       <section id="features" className="mx-auto max-w-7xl px-4 py-20 lg:px-8">
         <div className="mb-12 text-center">
           <h2 className="text-3xl font-bold sm:text-4xl">
@@ -303,7 +299,6 @@ function Landing() {
         </div>
       </section>
 
-      {/* Workflow */}
       <section id="workflow" className="mx-auto max-w-7xl px-4 py-20 lg:px-8">
         <div className="mb-12 text-center">
           <h2 className="text-3xl font-bold sm:text-4xl">From invite to insight in four steps</h2>
@@ -319,7 +314,6 @@ function Landing() {
         </div>
       </section>
 
-      {/* Benefits */}
       <section className="mx-auto max-w-7xl px-4 py-20 lg:px-8">
         <div className="glass rounded-3xl p-8 md:p-12">
           <div className="grid gap-8 md:grid-cols-2 md:items-center">
@@ -362,7 +356,6 @@ function Landing() {
         </div>
       </section>
 
-      {/* Pricing */}
       <section id="pricing" className="mx-auto max-w-7xl px-4 py-20 lg:px-8">
         <div className="mb-12 text-center">
           <h2 className="text-3xl font-bold sm:text-4xl">Simple pricing that scales with you</h2>
@@ -398,7 +391,6 @@ function Landing() {
         </div>
       </section>
 
-      {/* FAQ */}
       <section id="faq" className="mx-auto max-w-3xl px-4 py-20 lg:px-8">
         <div className="mb-8 text-center">
           <h2 className="text-3xl font-bold sm:text-4xl">Frequently asked questions</h2>
@@ -413,7 +405,6 @@ function Landing() {
         </Accordion>
       </section>
 
-      {/* CTA */}
       <section className="mx-auto max-w-5xl px-4 py-16 lg:px-8">
         <div className="glass gradient-bg rounded-3xl p-10 text-center shadow-glow">
           <h2 className="text-3xl font-black text-primary-foreground sm:text-4xl">
@@ -434,7 +425,6 @@ function Landing() {
         </div>
       </section>
 
-      {/* Footer */}
       <footer className="border-t border-border">
         <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-6 px-4 py-10 md:flex-row md:items-center lg:px-8">
           <div>

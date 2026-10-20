@@ -4,7 +4,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MeetingRecording } from "@/hooks/use-meeting-recording";
 
-/** Browser-support notice before recording, and the live listening bar during it. */
 export function LiveStatusBar({
   recording,
   meetingCompleted,

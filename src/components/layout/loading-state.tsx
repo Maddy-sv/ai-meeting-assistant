@@ -1,16 +1,14 @@
 import { Skeleton } from "@/components/ui/skeleton";
 
 export interface LoadingStateProps {
-  /** `list` = stacked rows, `cards` = card grid, `table` = header + rows, `stats` = stat tiles. */
   variant?: "list" | "cards" | "table" | "stats";
-  /** Number of placeholder items. */
+
   rows?: number;
-  /** Accessible label announced to screen readers. */
+
   label?: string;
   className?: string;
 }
 
-/** Skeleton placeholder shown while an async view loads. */
 export function LoadingState({
   variant = "list",
   rows = 4,
