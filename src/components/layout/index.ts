@@ -9,7 +9,9 @@ export { StatusBadge, type StatusBadgeProps } from "./status-badge";
 export {
   STATUS_CLASSES,
   STATUS_LABELS,
+  normalizeMeetingStatus,
   statusClasses,
   statusLabel,
   type KnownStatus,
+  type MeetingStatus,
 } from "./status";

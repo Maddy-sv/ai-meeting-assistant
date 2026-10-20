@@ -1,4 +1,5 @@
 /** Single source of truth for meeting and task status colours (see the design brief). */
+import { normalizeMeetingStatus } from "@/components/layout/status";
 
 export type TaskStatus = "pending" | "in_progress" | "done";
 
@@ -46,9 +47,7 @@ const MEETING_STATUS_LABEL: Record<MeetingStatusKey, string> = {
 };
 
 function meetingStatusKey(status: string | null | undefined): MeetingStatusKey {
-  if (status === "live" || status === "in_progress") return "live";
-  if (status === "completed") return "completed";
-  return "upcoming";
+  return normalizeMeetingStatus(status);
 }
 
 export function meetingStatusClass(status: string | null | undefined): string {

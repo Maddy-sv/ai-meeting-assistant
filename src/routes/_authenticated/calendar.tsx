@@ -41,6 +41,7 @@ import { useSession } from "@/lib/auth";
 import { platformLabel, safeExternalUrl } from "@/lib/format";
 import { createMeetings, dataKeys, listMyMeetings, type MeetingListRow } from "@/lib/rpc";
 import { cn } from "@/lib/utils";
+import { normalizeMeetingStatus } from "@/components/layout/status";
 
 export const Route = createFileRoute("/_authenticated/calendar")({
   head: () => ({ meta: [{ title: "Calendar — AI Powered Meeting Companion" }] }),
@@ -106,7 +107,7 @@ function CalendarPage() {
   }
 
   const tomorrowCount = meetingsOn(addDays(new Date(), 1)).filter(
-    (m) => m.status !== "completed",
+    (m) => normalizeMeetingStatus(m.status) !== "completed",
   ).length;
 
   // Agenda (small screens): meetings in the visible month grouped by day.
@@ -435,7 +436,7 @@ function CalendarPage() {
                                   {platformLabel(m.platform)}
                                 </span>
                               </span>
-                              <StatusBadge status={m.status} />
+                              <StatusBadge kind="meeting" status={m.status} />
                             </Link>
                           </li>
                         ))}

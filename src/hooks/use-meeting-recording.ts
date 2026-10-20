@@ -123,10 +123,10 @@ export function useMeetingRecording(
     const startedAt = meeting?.started_at || new Date().toISOString();
     const { error } = await supabase
       .from("meetings")
-      .update({ status: "in_progress", started_at: startedAt })
+      .update({ status: "live", started_at: startedAt })
       .eq("id", meetingId);
     if (error) toast.error(`Could not mark the meeting as live: ${error.message}`);
-    else setMeeting((m) => (m ? { ...m, status: "in_progress", started_at: startedAt } : m));
+    else setMeeting((m) => (m ? { ...m, status: "live", started_at: startedAt } : m));
     await ensureHostParticipant();
     toast.success("Recording started.");
   }

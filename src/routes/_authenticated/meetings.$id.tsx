@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { normalizeMeetingStatus } from "@/components/layout/status";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ActionItemsCard } from "@/components/meeting/ActionItemsCard";
@@ -112,9 +113,10 @@ function MeetingDetail() {
     );
   }
 
-  const completed = meeting.status === "completed";
+  const meetingStatus = normalizeMeetingStatus(meeting.status);
+  const completed = meetingStatus === "completed";
   // Before the meeting starts the briefing is shown up front; afterwards it is a tab.
-  const upcoming = !completed && meeting.status !== "in_progress" && !recording.live;
+  const upcoming = meetingStatus === "upcoming" && !recording.live;
   const activeTab = tab ?? (completed ? "summary" : "transcript");
   const hasTranscript = transcripts.length > 0;
 

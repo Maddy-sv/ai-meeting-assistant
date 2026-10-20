@@ -21,6 +21,18 @@ export const STATUS_LABELS: Record<KnownStatus, string> = {
   done: "Done",
 };
 
+export type MeetingStatus = "live" | "upcoming" | "completed";
+
+/**
+ * Maps a stored `meetings.status` onto the three meeting statuses. Older rows
+ * may still say "in_progress" for a running meeting, so that reads as live.
+ */
+export function normalizeMeetingStatus(status: string | null | undefined): MeetingStatus {
+  if (status === "live" || status === "in_progress") return "live";
+  if (status === "completed") return "completed";
+  return "upcoming";
+}
+
 function isKnown(status: string): status is KnownStatus {
   return Object.prototype.hasOwnProperty.call(STATUS_CLASSES, status);
 }

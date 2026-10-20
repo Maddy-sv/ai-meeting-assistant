@@ -29,6 +29,7 @@ import { ScheduleMeetingDialog } from "@/components/schedule/schedule-meeting-di
 import { useUser } from "@/lib/auth";
 import { formatDuration, platformLabel } from "@/lib/format";
 import { dataKeys, listMyMeetings, listProjects, type MeetingListRow } from "@/lib/rpc";
+import { normalizeMeetingStatus } from "@/components/layout/status";
 
 export const Route = createFileRoute("/_authenticated/meetings/")({
   head: () => ({ meta: [{ title: "Meetings — AI Powered Meeting Companion" }] }),
@@ -90,7 +91,7 @@ function MeetingsList() {
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return (meetings.data ?? []).filter((m) => {
-      if (status !== "all" && m.status !== status) return false;
+      if (status !== "all" && normalizeMeetingStatus(m.status) !== status) return false;
       if (!term) return true;
       const project = m.project_id ? (projectNames.get(m.project_id) ?? "") : "";
       return m.title.toLowerCase().includes(term) || project.toLowerCase().includes(term);
@@ -98,14 +99,22 @@ function MeetingsList() {
   }, [meetings.data, search, status, projectNames]);
 
   const active = filtered
-    .filter((m) => m.status !== "completed")
+    .filter((m) => normalizeMeetingStatus(m.status) !== "completed")
     .sort((a, b) => {
-      if (a.status === "live" && b.status !== "live") return -1;
-      if (b.status === "live" && a.status !== "live") return 1;
+      if (
+        normalizeMeetingStatus(a.status) === "live" &&
+        normalizeMeetingStatus(b.status) !== "live"
+      )
+        return -1;
+      if (
+        normalizeMeetingStatus(b.status) === "live" &&
+        normalizeMeetingStatus(a.status) !== "live"
+      )
+        return 1;
       return meetingTime(a).localeCompare(meetingTime(b));
     });
   const past = filtered
-    .filter((m) => m.status === "completed")
+    .filter((m) => normalizeMeetingStatus(m.status) === "completed")
     .sort((a, b) => meetingTime(b).localeCompare(meetingTime(a)));
 
   // Only keep selections that are still visible.
@@ -378,7 +387,7 @@ function MeetingRow({
       >
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-semibold">{m.title}</span>
-          <StatusBadge status={m.status} />
+          <StatusBadge kind="meeting" status={m.status} />
         </div>
         <div className="mt-1 text-xs text-muted-foreground">
           {platformLabel(m.platform)}

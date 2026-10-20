@@ -284,7 +284,7 @@ function ProjectPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <span className="min-w-0 truncate font-semibold">{m.title}</span>
-                      <StatusBadge status={m.status} />
+                      <StatusBadge kind="meeting" status={m.status} />
                     </div>
                     <span className="text-xs text-muted-foreground">
                       {platformLabel(m.platform)}

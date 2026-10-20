@@ -26,6 +26,7 @@ import {
   LoadingState,
   PageHeader,
   StatusBadge,
+  normalizeMeetingStatus,
   statusLabel,
 } from "@/components/layout";
 import { adminListMeetings } from "@/lib/rpc";
@@ -43,14 +44,17 @@ function AdminMeetings() {
   const [status, setStatus] = useState<string>(ALL);
 
   const statuses = useMemo(
-    () => Array.from(new Set((meetings.data ?? []).map((m) => m.status))).sort(),
+    () =>
+      Array.from(
+        new Set((meetings.data ?? []).map((m) => normalizeMeetingStatus(m.status))),
+      ).sort(),
     [meetings.data],
   );
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     return (meetings.data ?? []).filter((m) => {
-      if (status !== ALL && m.status !== status) return false;
+      if (status !== ALL && normalizeMeetingStatus(m.status) !== status) return false;
       if (!term) return true;
       return (
         m.title.toLowerCase().includes(term) ||
@@ -161,7 +165,7 @@ function AdminMeetings() {
                     <div className="text-xs text-muted-foreground">{m.host_email}</div>
                   </TableCell>
                   <TableCell>
-                    <StatusBadge status={m.status} />
+                    <StatusBadge kind="meeting" status={m.status} />
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-muted-foreground">
                     {m.scheduled_at

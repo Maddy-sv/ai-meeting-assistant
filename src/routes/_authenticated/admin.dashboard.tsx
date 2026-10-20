@@ -190,7 +190,7 @@ function AdminDashboard() {
                     {m.has_summary && (
                       <CheckCircle2 className="h-4 w-4 text-success" aria-label="Has summary" />
                     )}
-                    <StatusBadge status={m.status} />
+                    <StatusBadge kind="meeting" status={m.status} />
                   </div>
                 </li>
               ))}
