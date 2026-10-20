@@ -116,7 +116,7 @@ function ProjectDashboard() {
           <div className="grid md:grid-cols-2 gap-6">
             <div className="glass p-6 rounded-2xl border border-primary/20">
               <h3 className="text-lg font-bold mb-4 text-primary">Cumulative Progress</h3>
-              <div className="prose prose-invert max-w-none text-sm text-muted-foreground">
+              <div className="prose prose-invert max-w-none text-sm text-muted-foreground whitespace-pre-line">
                 {cumulativeSummary.progress_report}
               </div>
             </div>

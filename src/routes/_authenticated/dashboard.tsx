@@ -11,20 +11,12 @@ function DashboardRedirector() {
   const router = useRouter();
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: u }) => {
+    supabase.auth.getUser().then(({ data: u }) => {
       if (!u.user) {
         router.navigate({ to: "/auth", replace: true });
         return;
       }
-      
-      const { data: roles } = await supabase.from("user_roles").select("role").eq("user_id", u.user.id);
-      const isAdmin = (roles ?? []).some((r: any) => r.role === "admin");
-
-      if (isAdmin) {
-        router.navigate({ to: "/admin/dashboard", replace: true });
-      } else {
-        router.navigate({ to: "/user/dashboard", replace: true });
-      }
+      router.navigate({ to: "/user/dashboard", replace: true });
     });
   }, [router]);
 

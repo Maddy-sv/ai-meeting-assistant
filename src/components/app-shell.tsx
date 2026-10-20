@@ -1,8 +1,7 @@
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { 
   LayoutDashboard, Video, MessageSquare, CalendarDays, User, LogOut, 
-  Sparkles, Bell, Search, ListTodo, ShieldAlert, Users, Zap, 
-  TrendingUp, FileText, Lock, Settings, ShieldCheck, Menu, X, FolderKanban
+  Sparkles, Bell, ListTodo, Menu, X, FolderKanban
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,19 +18,12 @@ const USER_NAV = [
   { to: "/profile", label: "Profile & Settings", icon: User },
 ] as const;
 
-const ADMIN_NAV = [
-  { to: "/admin/dashboard", label: "Admin Overview", icon: ShieldAlert },
-  { to: "/admin/users", label: "User Management", icon: Users },
-  { to: "/admin/meetings", label: "Meeting Management", icon: Video },
-  { to: "/admin/ai", label: "AI Processing", icon: Zap },
-] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [email, setEmail] = useState<string>("");
   const [name, setName] = useState<string>("");
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Close mobile menu on route change
@@ -50,10 +42,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           displayName = (prof as any).full_name;
         }
         setName(displayName);
-
-        supabase.from("user_roles").select("role").eq("user_id", data.user.id).then(({ data: roles }) => {
-          setIsAdmin((roles ?? []).some((r: any) => r.role === "admin"));
-        });
       }
     }
 
@@ -74,26 +62,23 @@ export function AppShell({ children }: { children: ReactNode }) {
     router.navigate({ to: "/auth", replace: true });
   }
 
-  const inAdminWorkspace = pathname.startsWith("/admin");
-  const currentNav = inAdminWorkspace ? ADMIN_NAV : USER_NAV;
-
   const SidebarContent = () => (
     <>
-      <Link to={inAdminWorkspace ? "/admin/dashboard" : "/user/dashboard"} className="mb-4 flex items-center gap-2 px-2">
-        <div className={`grid h-9 w-9 place-items-center rounded-xl shadow-glow ${inAdminWorkspace ? 'bg-red-600' : 'gradient-bg'}`}>
-          {inAdminWorkspace ? <ShieldAlert className="h-5 w-5 text-white" /> : <Sparkles className="h-5 w-5 text-primary-foreground" />}
+      <Link to="/user/dashboard" className="mb-4 flex items-center gap-2 px-2">
+        <div className="grid h-9 w-9 place-items-center rounded-xl shadow-glow gradient-bg">
+          <Sparkles className="h-5 w-5 text-primary-foreground" />
         </div>
         <div>
           <div className="text-lg font-bold tracking-tight">AI Companion</div>
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-            {inAdminWorkspace ? "Admin Center" : "Workspace"}
+            Workspace
           </div>
         </div>
       </Link>
       
       <nav className="mt-2 flex flex-col gap-1 overflow-y-auto pb-4">
-        {currentNav.map(({ to, label, icon: Icon }) => {
-          const active = pathname === to || pathname.startsWith(to + "/") && to !== "/user/dashboard" && to !== "/admin/dashboard";
+        {USER_NAV.map(({ to, label, icon: Icon }) => {
+          const active = pathname === to || (pathname.startsWith(to + "/") && to !== "/user/dashboard");
           return (
             <Link
               key={label}
@@ -101,7 +86,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               className={
                 "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition " +
                 (active
-                  ? (inAdminWorkspace ? "bg-red-600 text-white shadow-[0_0_10px_rgba(220,38,38,0.3)]" : "gradient-bg text-primary-foreground shadow-glow")
+                  ? "gradient-bg text-primary-foreground shadow-glow"
                   : "text-muted-foreground hover:bg-white/5 hover:text-foreground")
               }
             >
@@ -110,24 +95,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Link>
           );
         })}
-
-        {/* Workspace Switcher for Admins */}
-        {isAdmin && !inAdminWorkspace && (
-          <div className="mt-4 pt-4 border-t border-white/5">
-            <Link to="/admin/dashboard" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition">
-              <ShieldAlert className="h-4 w-4 shrink-0" />
-              <span>Switch to Admin</span>
-            </Link>
-          </div>
-        )}
-        {isAdmin && inAdminWorkspace && (
-          <div className="mt-4 pt-4 border-t border-white/5">
-            <Link to="/user/dashboard" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-blue-400 hover:bg-blue-500/10 transition">
-              <LayoutDashboard className="h-4 w-4 shrink-0" />
-              <span>Switch to User</span>
-            </Link>
-          </div>
-        )}
       </nav>
 
       <div className="mt-auto space-y-3 pt-4 border-t border-white/5">
@@ -171,9 +138,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Menu className="h-5 w-5" />
             </Button>
             
-            <Link to={inAdminWorkspace ? "/admin/dashboard" : "/user/dashboard"} className="flex items-center gap-2 lg:hidden ml-2">
-              <div className={`grid h-8 w-8 place-items-center rounded-lg ${inAdminWorkspace ? 'bg-red-600' : 'gradient-bg'}`}>
-                {inAdminWorkspace ? <ShieldAlert className="h-4 w-4 text-white" /> : <Sparkles className="h-4 w-4 text-primary-foreground" />}
+            <Link to="/user/dashboard" className="flex items-center gap-2 lg:hidden ml-2">
+              <div className="grid h-8 w-8 place-items-center rounded-lg gradient-bg">
+                <Sparkles className="h-4 w-4 text-primary-foreground" />
               </div>
             </Link>
             
