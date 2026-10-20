@@ -189,7 +189,9 @@ export const summarizeMeeting = createServerFn({ method: "POST" })
       });
     } catch (err) {
       if (!(err instanceof AiQuotaError) || imageParts.length === 0) throw err;
-      console.warn("[ai] summary with screenshots hit the quota, retrying with the transcript only");
+      console.warn(
+        "[ai] summary with screenshots hit the quota, retrying with the transcript only",
+      );
       res = await generateForUser(supabase, userId, "summarizeMeeting", {
         contents: [{ role: "user", parts: [textPart] }],
         config: summaryConfig,
@@ -1277,12 +1279,17 @@ export const createActionItemServer = createServerFn({ method: "POST" })
       if (!deadline) throw new Error("The deadline is not a valid date.");
     }
 
+    const assignee =
+      data.assignee && SELF_SPEAKERS.has(data.assignee.toLowerCase())
+        ? await getHostName(supabase, userId)
+        : data.assignee || null;
+
     const { data: task, error } = await supabase
       .from("action_items")
       .insert({
         meeting_id: data.meetingId,
         title: data.title,
-        assignee: data.assignee || null,
+        assignee,
         deadline,
         status: data.status ?? "pending",
       })
