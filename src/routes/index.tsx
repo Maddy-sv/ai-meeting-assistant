@@ -251,9 +251,9 @@ function Landing() {
             <div className="grid gap-4 md:grid-cols-3">
               <div className="md:col-span-2 space-y-3">
                 {[
-                  { s: "Anna", t: "Let's ship the new auth flow this Friday." },
-                  { s: "Marcus", t: "I'll own the migration. QA can start Wednesday." },
-                  { s: "Priya", t: "Risk: legacy SSO customers may need a re-invite." },
+                  { s: "Product lead", t: "Let's ship the new auth flow this Friday." },
+                  { s: "Engineer", t: "I'll own the migration. QA can start Wednesday." },
+                  { s: "Support lead", t: "Risk: legacy SSO customers may need a re-invite." },
                 ].map((m, i) => (
                   <div key={i} className="glass rounded-2xl p-3 text-sm">
                     <div className="text-xs text-muted-foreground">{m.s}</div>
@@ -267,7 +267,7 @@ function Landing() {
                 </div>
                 <div className="mt-2 text-sm font-semibold">Ship new auth by Friday</div>
                 <ul className="mt-3 space-y-1.5 text-xs text-muted-foreground">
-                  <li>• Marcus owns migration</li>
+                  <li>• Engineer owns migration</li>
                   <li>• QA starts Wednesday</li>
                   <li>• Risk: SSO re-invite for legacy</li>
                 </ul>
