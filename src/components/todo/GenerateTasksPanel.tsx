@@ -55,6 +55,7 @@ export function GenerateTasksPanel({ onFinished }: { onFinished: () => Promise<v
       let taskCount = 0;
       let processed = 0;
       const failed: string[] = [];
+      let retry: typeof meetings = [];
       for (const [index, meeting] of meetings.entries()) {
         if (cancelRef.current) break;
         setRun((r) => ({
@@ -68,10 +69,30 @@ export function GenerateTasksPanel({ onFinished }: { onFinished: () => Promise<v
           const res = await syncFn({ data: { meetingId: meeting.id } });
           taskCount += res.action_items.length;
           processed += 1;
+        } catch {
+          retry.push(meeting);
+        }
+      }
+
+      for (const [index, meeting] of retry.entries()) {
+        if (cancelRef.current) break;
+        setRun((r) => ({
+          stage: "sync",
+          current: index + 1,
+          total: retry.length,
+          title: `Retrying ${meeting.title}`,
+          cancelling: r?.cancelling ?? false,
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        try {
+          const res = await syncFn({ data: { meetingId: meeting.id } });
+          taskCount += res.action_items.length;
+          processed += 1;
         } catch (err) {
           failed.push(`${meeting.title} (${errorMessage(err, "failed")})`);
         }
       }
+      retry = [];
 
       let progressNote = "";
       setRun((r) => (r ? { ...r, stage: "reconcile" } : r));

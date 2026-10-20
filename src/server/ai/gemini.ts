@@ -2,8 +2,9 @@ import { GoogleGenAI, type GenerateContentConfig, type ContentListUnion } from "
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
 export const DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite";
-export const AI_CALL_DEADLINE_MS = 25_000;
-const RETRY_DELAY_MS = 1_000;
+export const AI_CALL_DEADLINE_MS = 90_000;
+const ATTEMPT_TIMEOUT_MS = 35_000;
+const RETRY_DELAY_MS = 2_000;
 
 export function getModelChain(preferred?: string): string[] {
   const primary = preferred?.trim() || process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
@@ -68,48 +69,42 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function generate(opts: GenerateOptions): Promise<GenerateResult> {
   const ai = getClient();
   const deadline = Date.now() + (opts.deadlineMs ?? AI_CALL_DEADLINE_MS);
+  const chain = getModelChain(opts.model);
+  const plan = chain.length > 1 ? [chain[0], chain[1], chain[0], chain[1]] : [chain[0], chain[0]];
   let last: Failure = "other";
 
-  for (const model of getModelChain(opts.model)) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 500) {
-        throw new Error("The AI service took too long to respond. Please try again.");
+  for (const [attempt, model] of plan.entries()) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 1_000) break;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.min(remaining, ATTEMPT_TIMEOUT_MS));
+    try {
+      const res = await ai.models.generateContent({
+        model,
+        contents: opts.contents,
+        config: { ...opts.config, abortSignal: controller.signal },
+      });
+      return { text: res.text ?? "", model };
+    } catch (err) {
+      last = classify(err);
+      console.warn(
+        `[ai] ${model} attempt ${attempt + 1} failed (${last}):`,
+        err instanceof Error ? err.message : err,
+      );
+      if (last === "auth") throw new Error(AI_KEY_INVALID_MESSAGE);
+      if (last === "other") break;
+      if (attempt < plan.length - 1 && deadline - Date.now() > RETRY_DELAY_MS + 1_000) {
+        await sleep(last === "quota" ? RETRY_DELAY_MS * 2 : RETRY_DELAY_MS);
       }
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), remaining);
-      try {
-        const res = await ai.models.generateContent({
-          model,
-          contents: opts.contents,
-          config: { ...opts.config, abortSignal: controller.signal },
-        });
-        return { text: res.text ?? "", model };
-      } catch (err) {
-        last = classify(err);
-        console.warn(
-          `[ai] ${model} attempt ${attempt + 1} failed (${last}):`,
-          err instanceof Error ? err.message : err,
-        );
-        if (last === "auth") {
-          throw new Error(AI_KEY_INVALID_MESSAGE);
-        }
-        if (last === "timeout") {
-          throw new Error("The AI service took too long to respond. Please try again.");
-        }
-        if (last === "transient" && attempt === 0 && deadline - Date.now() > RETRY_DELAY_MS + 500) {
-          await sleep(RETRY_DELAY_MS);
-          continue;
-        }
-        break;
-      } finally {
-        clearTimeout(timer);
-      }
+    } finally {
+      clearTimeout(timer);
     }
   }
 
   if (last === "quota") throw new AiQuotaError();
   if (last === "transient") throw new Error(AI_BUSY_MESSAGE);
+  if (last === "timeout")
+    throw new Error("The AI service took too long to respond. Please try again.");
   throw new Error("The AI service is unavailable right now. Please try again in a minute.");
 }
 
