@@ -441,6 +441,7 @@ export type Database = {
         Args: never;
         Returns: {
           created_at: string;
+          duration_seconds: number;
           has_summary: boolean;
           host_email: string;
           host_name: string;

@@ -29,6 +29,7 @@ import {
   normalizeMeetingStatus,
   statusLabel,
 } from "@/components/layout";
+import { formatDuration } from "@/lib/format";
 import { adminListMeetings } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/admin/meetings")({
@@ -141,6 +142,7 @@ function AdminMeetings() {
                 <TableHead>Host</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Scheduled</TableHead>
+                <TableHead className="text-right">Duration</TableHead>
                 <TableHead className="text-right">Transcript lines</TableHead>
                 <TableHead>Summary</TableHead>
               </TableRow>
@@ -171,6 +173,9 @@ function AdminMeetings() {
                     {m.scheduled_at
                       ? format(new Date(m.scheduled_at), "d MMM yyyy, HH:mm")
                       : "Not scheduled"}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-right tabular-nums text-muted-foreground">
+                    {m.duration_seconds ? formatDuration(m.duration_seconds) : "—"}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{m.transcript_count}</TableCell>
                   <TableCell>

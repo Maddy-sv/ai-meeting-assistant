@@ -63,6 +63,7 @@ export interface AdminMeeting {
   created_at: string;
   transcript_count: number;
   has_summary: boolean;
+  duration_seconds: number | null;
 }
 export async function adminListMeetings(): Promise<AdminMeeting[]> {
   return rpcData("admin_list_meetings", await supabase.rpc("admin_list_meetings")) ?? [];
