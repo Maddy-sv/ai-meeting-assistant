@@ -145,12 +145,24 @@ function AdminUsers() {
                 const isMe = u.id === me?.id;
                 return (
                   <TableRow key={u.id} className="border-border">
-                    <TableCell className="min-w-48">
-                      <div className="font-medium">
-                        {u.full_name || "Unnamed user"}
-                        {isMe && <span className="ml-2 text-xs text-muted-foreground">(you)</span>}
+                    <TableCell className="min-w-56">
+                      <div className="flex items-center gap-3">
+                        <span
+                          className="gradient-bg grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-bold text-primary-foreground"
+                          aria-hidden
+                        >
+                          {(u.full_name || u.email || "?").trim().charAt(0).toUpperCase() || "?"}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="font-medium">
+                            {u.full_name || "Unnamed user"}
+                            {isMe && (
+                              <span className="ml-2 text-xs text-muted-foreground">(you)</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground">{u.email}</div>
+                        </div>
                       </div>
-                      <div className="text-xs text-muted-foreground">{u.email}</div>
                     </TableCell>
                     <TableCell>
                       {u.is_admin ? (
