@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { isSameName } from "@/components/meeting/utils";
 import { CreateTaskDialog } from "@/components/todo/CreateTaskDialog";
+import { GenerateTasksPanel } from "@/components/todo/GenerateTasksPanel";
 import { KanbanBoard } from "@/components/todo/KanbanBoard";
 import { TaskDetailDialog } from "@/components/todo/TaskDetailDialog";
 import { TaskFilters, type TaskScope } from "@/components/todo/TaskFilters";
@@ -59,6 +60,8 @@ function TodoPage() {
           onCreate={todo.createTask}
         />
       </div>
+
+      <GenerateTasksPanel onFinished={todo.reload} />
 
       <TaskFilters
         query={query}
