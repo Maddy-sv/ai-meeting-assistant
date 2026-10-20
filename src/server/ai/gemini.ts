@@ -14,13 +14,17 @@ export function getModelChain(preferred?: string): string[] {
 }
 
 let client: GoogleGenAI | undefined;
+let activeApiKey: string | undefined;
 function getClient(): GoogleGenAI {
   const key = process.env.GEMINI_API_KEY;
   if (!key) {
     console.error("[ai] GEMINI_API_KEY is not set");
     throw new Error("AI features are not configured on the server.");
   }
-  client ??= new GoogleGenAI({ apiKey: key });
+  if (!client || activeApiKey !== key) {
+    activeApiKey = key;
+    client = new GoogleGenAI({ apiKey: key });
+  }
   return client;
 }
 
