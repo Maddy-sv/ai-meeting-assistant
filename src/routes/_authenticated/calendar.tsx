@@ -286,10 +286,16 @@ function CalendarPage() {
       {tomorrowCount > 0 && (
         <div
           role="status"
-          className="flex items-center gap-3 rounded-2xl bg-info/10 px-4 py-3 text-sm text-info"
+          className="flex items-start gap-3 rounded-2xl border border-info/40 bg-info/10 px-4 py-3 text-sm text-info"
         >
-          <Bell className="h-4 w-4 shrink-0" aria-hidden />
-          You have {tomorrowCount} meeting{tomorrowCount === 1 ? "" : "s"} scheduled for tomorrow.
+          <Bell className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <div>
+            <p className="font-semibold">Heads up!</p>
+            <p>
+              You have {tomorrowCount} meeting{tomorrowCount === 1 ? "" : "s"} scheduled for
+              tomorrow.
+            </p>
+          </div>
         </div>
       )}
 
@@ -381,7 +387,7 @@ function CalendarPage() {
                               className="block rounded-md bg-primary/15 px-2 py-1 text-xs leading-tight text-foreground transition hover:bg-primary/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             >
                               <span className="font-semibold text-primary">
-                                {format(new Date(m.scheduled_at), "HH:mm")}
+                                {format(new Date(m.scheduled_at), "h:mm a")}
                               </span>
                               <span className="block truncate">{m.title}</span>
                             </Link>
@@ -428,7 +434,7 @@ function CalendarPage() {
                               className="glass flex items-center gap-3 rounded-2xl p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             >
                               <span className="w-12 shrink-0 text-sm font-bold text-primary">
-                                {format(new Date(m.scheduled_at), "HH:mm")}
+                                {format(new Date(m.scheduled_at), "h:mm a")}
                               </span>
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate font-medium">{m.title}</span>
