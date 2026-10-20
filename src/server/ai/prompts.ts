@@ -43,7 +43,7 @@ Return JSON with:
 - key_points: up to 6 strings.
 - risks: up to 4 strings.
 - follow_ups: up to 5 strings.
-- action_items: [{ title, assignee, deadline, status }]. assignee is the person's name exactly as spoken, or null if nobody was named. If the organiser takes a task, use "${p.hostName}". deadline is the deadline as stated (for example "Friday" or "2026-11-03"), or null. status is "done" only if the transcript says the task is already finished, otherwise "pending".
+- action_items: [{ title, assignee, deadline, status }]. assignee is the person's name exactly as spoken, or null if nobody was named. If the organiser takes a task, use "${p.hostName}". deadline is the deadline as stated (for example "Friday" or "2026-11-03"), or null. status is "done" only if the transcript says the task is already finished, "in_progress" if someone says they have started it, are working on it or it is partly done, otherwise "pending".
 - decisions: [{ description, made_by }] with no duplicates; made_by is a name or null.`;
 }
 
@@ -99,14 +99,28 @@ ${asData("summary", [p.summary, ...p.keyPoints].filter(Boolean).join("\n"), 20_0
 ${asData("transcript", p.transcript)}
 
 Return JSON with:
-- action_items: [{ title, assignee, deadline, status }] for every participant. assignee is the person's name as spoken, or null. If the organiser takes a task, use "${p.hostName}". deadline as stated, or null. status "done" only if the records say it is finished, otherwise "pending".
+- action_items: [{ title, assignee, deadline, status, evidence }] for every participant. assignee is the person's name as spoken, or null. If the organiser takes a task, use "${p.hostName}". deadline as stated, or null.
+  status is "done" when the records say the task was finished, "in_progress" when someone says they have started it, are working on it or it is partly done, otherwise "pending".
+  evidence is a short quote of at most 200 characters copied word for word from the records that shows the task and its status. Leave out any task you cannot quote.
 - decisions: [{ description, made_by }] without duplicates.`;
 }
+
+const extractedItemSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    title: { type: Type.STRING },
+    assignee: { type: Type.STRING, nullable: true },
+    deadline: { type: Type.STRING, nullable: true },
+    status: { type: Type.STRING, format: "enum", enum: ["pending", "in_progress", "done"] },
+    evidence: { type: Type.STRING },
+  },
+  required: ["title", "status", "evidence"],
+};
 
 export const EXTRACTION_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {
-    action_items: { type: Type.ARRAY, items: actionItemSchema },
+    action_items: { type: Type.ARRAY, items: extractedItemSchema },
     decisions: { type: Type.ARRAY, items: decisionSchema },
   },
   required: ["action_items", "decisions"],

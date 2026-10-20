@@ -371,7 +371,7 @@ export function planTaskProgressUpdates(
     const current = normalizeStatus(t.status);
     if (current === "done") continue;
     const key = (t.canonical_key || "").trim() || canonicalTaskKey(t.title, ignore);
-    let next = current;
+    let next: TaskStatus = current;
     for (const other of best.get(key) ?? []) {
       if (other.index > index) next = mergeTaskStatus(next, other.status);
     }

@@ -2,10 +2,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Tables } from "@/integrations/supabase/types";
 import {
   canonicalTaskKey,
-  confirmsCompletion,
   deduplicateDecisions,
+  mergeTaskStatus,
   normalizeAssignee,
   resolveDeadlineToISODate,
+  statusFromRecords,
 } from "@/lib/continuous-memory";
 
 type Client = SupabaseClient<Database>;
@@ -94,15 +95,11 @@ export async function saveExtractedActionItems(
     const key = canonicalTaskKey(title);
     if (rows.has(key)) continue;
 
-    const aiDone =
-      item.status === "done" ||
-      (opts.evidenceText ? confirmsCompletion(opts.evidenceText, title) : false);
-    const prior = existingByKey.get(key)?.status;
-    const status = aiDone
-      ? "done"
-      : prior === "done" || prior === "in_progress"
-        ? prior
-        : "pending";
+    const fromRecords = opts.evidenceText ? statusFromRecords(opts.evidenceText, title) : null;
+    const status = mergeTaskStatus(
+      mergeTaskStatus(existingByKey.get(key)?.status, item.status),
+      fromRecords,
+    );
 
     rows.set(key, {
       meeting_id: meeting.id,
