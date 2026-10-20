@@ -32,9 +32,11 @@ import { formatDeadline } from "./utils";
 function AddTaskDialog({
   tasks,
   participants,
+  hostName,
 }: {
   tasks: MeetingTasks;
   participants: Participant[];
+  hostName: string;
 }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -60,14 +62,14 @@ function AddTaskDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="rounded-full">
-          <Plus className="h-4 w-4" /> Add task
+          <Plus className="h-4 w-4" /> Add Task
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Add action item</DialogTitle>
+          <DialogTitle>Add Action Item</DialogTitle>
           <DialogDescription>
-            The task is linked to this meeting and your To-do board.
+            Create a task linked directly to this meeting. It also appears on your To-Do list.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
@@ -81,13 +83,18 @@ function AddTaskDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="task-assignee">Assignee (optional)</Label>
+            <Label htmlFor="task-assignee">Assignee</Label>
             <Input
               id="task-assignee"
               list="task-assignee-options"
+              placeholder={hostName}
+              aria-describedby="task-assignee-hint"
               value={assignee}
               onChange={(e) => setAssignee(e.target.value)}
             />
+            <p id="task-assignee-hint" className="text-xs text-muted-foreground">
+              Leave empty to assign it to {hostName}.
+            </p>
             <datalist id="task-assignee-options">
               {participants.map((p) => (
                 <option key={p.id} value={p.name} />
@@ -108,7 +115,8 @@ function AddTaskDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={saving || !title.trim()}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />} Add task
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {saving ? "Adding..." : "Add to Meeting & To-Do"}
             </Button>
           </DialogFooter>
         </form>
@@ -181,16 +189,22 @@ function ActionRow({
 export function ActionItemsCard({
   actions,
   participants,
+  hostName,
   hasSummary,
   hasTranscript,
   tasks,
+  title = "Action Items & To-Do Sync",
+  description = "Tasks from this meeting automatically sync with your personal To-Do list.",
   readOnly = false,
 }: {
   actions: ActionItem[];
   participants: Participant[];
+  hostName: string;
   hasSummary: boolean;
   hasTranscript: boolean;
   tasks: MeetingTasks;
+  title?: string;
+  description?: string;
   readOnly?: boolean;
 }) {
   const busy = tasks.syncingTasks || tasks.summarizing;
@@ -201,19 +215,17 @@ export function ActionItemsCard({
           <div className="flex items-center gap-2">
             <CheckSquare className="h-5 w-5 text-primary" aria-hidden />
             <h3 id="actions-heading" className="text-lg font-semibold">
-              Action items
+              {title}
             </h3>
           </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Tasks from this meeting also appear on your To-do board.
-          </p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {!readOnly && (
             <>
               <Button
                 size="sm"
-                onClick={() => void (hasSummary ? tasks.syncTasks() : tasks.generateSummary())}
+                onClick={() => void tasks.syncTasks()}
                 disabled={busy || !hasTranscript}
                 className="gradient-bg rounded-full text-primary-foreground"
               >
@@ -222,30 +234,57 @@ export function ActionItemsCard({
                 ) : (
                   <Sparkles className="h-4 w-4" />
                 )}
-                {hasSummary ? "Extract tasks with AI" : "Generate summary and tasks"}
+                {busy
+                  ? "Generating & Extracting..."
+                  : hasSummary
+                    ? "Auto-Extract Tasks with AI"
+                    : "Generate Summary & Tasks"}
               </Button>
-              <AddTaskDialog tasks={tasks} participants={participants} />
+              <AddTaskDialog tasks={tasks} participants={participants} hostName={hostName} />
             </>
           )}
           <Button asChild size="sm" variant="ghost" className="rounded-full text-primary">
             <Link to="/todo">
-              To-do board <ArrowRight className="h-4 w-4" />
+              Open To-Do List <ArrowRight className="h-4 w-4" />
             </Link>
           </Button>
         </div>
       </div>
       {actions.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-          <p className="font-medium text-foreground">No action items yet</p>
-          <p className="mt-1 text-xs">
-            {readOnly
-              ? "No tasks were recorded for this meeting."
-              : !hasTranscript
-                ? "Record or paste a transcript, or add a task by hand."
-                : hasSummary
-                  ? "Extract tasks from the transcript with AI, or add one by hand."
-                  : "Generate the summary to extract tasks, or add one by hand."}
+        <div className="flex flex-col items-center rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">
+            No action items recorded for this meeting yet.
           </p>
+          {readOnly ? (
+            <p className="mt-1 text-xs">No tasks were recorded for this meeting.</p>
+          ) : !hasTranscript ? (
+            <p className="mt-1 text-xs">Record or paste a transcript, or add a task by hand.</p>
+          ) : hasSummary ? (
+            <p className="mt-1 text-xs">
+              Click <strong className="text-foreground">Auto-Extract Tasks with AI</strong> above to
+              extract tasks from the summary, or add one by hand.
+            </p>
+          ) : (
+            <>
+              <p className="mt-1 text-xs">
+                The meeting summary has not been generated yet, so action items have not been
+                extracted.
+              </p>
+              <Button
+                size="sm"
+                onClick={() => void tasks.generateSummary()}
+                disabled={tasks.summarizing}
+                className="gradient-bg mt-3 rounded-full text-primary-foreground shadow-glow"
+              >
+                {tasks.summarizing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {tasks.summarizing ? "Generating Summary & Tasks..." : "Generate Summary & Tasks"}
+              </Button>
+            </>
+          )}
         </div>
       ) : (
         <ul className="space-y-2.5">

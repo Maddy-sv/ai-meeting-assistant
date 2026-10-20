@@ -26,13 +26,17 @@ export function SummaryTab({
   summary,
   hasTranscript,
   summarizing,
+  error,
   onGenerate,
+  onCancel,
   readOnly = false,
 }: {
   summary: Summary | null;
   hasTranscript: boolean;
   summarizing: boolean;
+  error: string | null;
   onGenerate: () => void;
+  onCancel: () => void;
   readOnly?: boolean;
 }) {
   if (summarizing && !summary) {
@@ -42,7 +46,12 @@ export function SummaryTab({
         role="status"
       >
         <Loader2 className="h-6 w-6 animate-spin text-primary" aria-hidden />
-        <p className="text-sm text-muted-foreground">Generating the summary from the transcript…</p>
+        <p className="text-sm text-muted-foreground">Generating AI summary from your transcript…</p>
+        {!readOnly && (
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={onCancel}>
+            Cancel / Reset
+          </Button>
+        )}
       </div>
     );
   }
@@ -52,12 +61,19 @@ export function SummaryTab({
       <div className="glass flex flex-col items-center gap-3 rounded-2xl p-10 text-center">
         <Sparkles className="h-8 w-8 text-primary" aria-hidden />
         <h3 className="text-lg font-semibold">No summary yet</h3>
+        {error && !readOnly && (
+          <p role="alert" className="max-w-md text-sm text-destructive">
+            {error}
+          </p>
+        )}
         <p className="max-w-md text-sm text-muted-foreground">
           {readOnly
             ? "No summary has been generated for this meeting."
-            : hasTranscript
-              ? "Generate a summary, action items and decisions from this meeting's transcript."
-              : "A summary needs a transcript. Record the meeting or paste a transcript first."}
+            : error
+              ? "Summary generation was interrupted due to AI quota limits or network issues."
+              : hasTranscript
+                ? "Generate a summary, action items and decisions from this meeting's transcript."
+                : "A summary needs a transcript. Record the meeting or paste a transcript first."}
         </p>
         {!readOnly && (
           <Button
@@ -65,7 +81,8 @@ export function SummaryTab({
             disabled={!hasTranscript || summarizing}
             className="gradient-bg rounded-full text-primary-foreground shadow-glow"
           >
-            <Sparkles className="h-4 w-4" /> Generate summary
+            {error ? <RefreshCw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+            {error ? "Retry Summary Generation" : "Generate Summary"}
           </Button>
         )}
       </div>
@@ -103,7 +120,7 @@ export function SummaryTab({
       </section>
       <SummaryList title="Key discussion points" items={toStringList(summary.key_points)} />
       <SummaryList title="Risks" items={toStringList(summary.risks)} />
-      <SummaryList title="Follow-ups" items={toStringList(summary.follow_ups)} />
+      <SummaryList title="Follow-up tasks" items={toStringList(summary.follow_ups)} />
     </div>
   );
 }

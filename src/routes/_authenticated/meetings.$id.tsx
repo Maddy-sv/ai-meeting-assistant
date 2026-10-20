@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, Eye, Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Eye, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { normalizeMeetingStatus } from "@/components/layout/status";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { EmailComposerDialog } from "@/components/meeting/EmailComposerDialog";
 import { EmailTab } from "@/components/meeting/EmailTab";
 import { LiveStatusBar } from "@/components/meeting/LiveStatusBar";
 import { MeetingHeader } from "@/components/meeting/MeetingHeader";
+import { ParticipantRecaps } from "@/components/meeting/ParticipantRecaps";
 import { ParticipantsPanel } from "@/components/meeting/ParticipantsPanel";
 import { PipOverlay } from "@/components/meeting/PipOverlay";
 import { SummaryTab } from "@/components/meeting/SummaryTab";
@@ -75,10 +76,11 @@ function MeetingDetail() {
   const { id } = Route.useParams();
   const data = useMeetingData(id);
   const tasks = useMeetingTasks(data);
-  const edits = useMeetingTranscriptEdits(data);
+  const edits = useMeetingTranscriptEdits(data, { onCleaned: tasks.refreshAfterClean });
   const recording = useMeetingRecording(data, (shots) => tasks.generateSummary(shots));
   const pip = usePictureInPicture();
   const [emailOpen, setEmailOpen] = useState(false);
+  const [emailTo, setEmailTo] = useState("");
   const [tab, setTab] = useState<string | null>(null);
 
   const { meeting, transcripts, participants, summary, actions, decisions, hostName } = data;
@@ -124,7 +126,16 @@ function MeetingDetail() {
 
   async function openPip() {
     const ok = await pip.open();
-    if (!ok) toast.error("Could not open the floating window. Allow pop-ups for this site.");
+    if (ok) {
+      toast.success("Floating Live Overlay opened! It stays on top while you are in your meeting.");
+    } else {
+      toast.error("Could not open the floating window. Allow pop-ups for this site.");
+    }
+  }
+
+  function openEmail(to = "") {
+    setEmailTo(to);
+    setEmailOpen(true);
   }
 
   return (
@@ -135,7 +146,7 @@ function MeetingDetail() {
         recording={recording}
         summarizing={tasks.summarizing}
         onOpenPip={() => void openPip()}
-        onShareEmail={() => setEmailOpen(true)}
+        onShareEmail={() => openEmail()}
         onSaveLink={edits.saveMeetingLink}
         readOnly={readOnly}
       />
@@ -154,10 +165,17 @@ function MeetingDetail() {
 
       <Tabs value={activeTab} onValueChange={setTab}>
         <TabsList className="h-auto flex-wrap">
-          {completed && <TabsTrigger value="summary">Summary</TabsTrigger>}
-          {completed && <TabsTrigger value="actions">Actions & decisions</TabsTrigger>}
-          {completed && <TabsTrigger value="email">Email & recaps</TabsTrigger>}
-          <TabsTrigger value="transcript">Transcript</TabsTrigger>
+          {completed && <TabsTrigger value="summary">AI Summary</TabsTrigger>}
+          {completed && <TabsTrigger value="actions">Actions & Decisions</TabsTrigger>}
+          {completed && <TabsTrigger value="tasks_recap">Tasks & Recap</TabsTrigger>}
+          {completed && (
+            <TabsTrigger value="send_email" className="gap-1.5">
+              <Mail className="h-3.5 w-3.5 text-primary" aria-hidden /> Send Email
+            </TabsTrigger>
+          )}
+          <TabsTrigger value="transcript">
+            {completed ? "Full Transcript" : "Live Transcript"}
+          </TabsTrigger>
           {!upcoming && !readOnly && <TabsTrigger value="briefing">Briefing</TabsTrigger>}
         </TabsList>
 
@@ -193,7 +211,9 @@ function MeetingDetail() {
             summary={summary}
             hasTranscript={hasTranscript}
             summarizing={tasks.summarizing}
+            error={tasks.summaryError}
             onGenerate={() => void tasks.generateSummary()}
+            onCancel={tasks.cancelSummary}
             readOnly={readOnly}
           />
         </TabsContent>
@@ -202,6 +222,7 @@ function MeetingDetail() {
           <ActionItemsCard
             actions={actions}
             participants={participants}
+            hostName={hostName}
             hasSummary={!!summary}
             hasTranscript={hasTranscript}
             tasks={tasks}
@@ -210,13 +231,34 @@ function MeetingDetail() {
           <DecisionsCard decisions={decisions} tasks={tasks} readOnly={readOnly} />
         </TabsContent>
 
-        <TabsContent value="email">
+        <TabsContent value="tasks_recap" className="space-y-6">
+          <ActionItemsCard
+            actions={actions}
+            participants={participants}
+            hostName={hostName}
+            hasSummary={!!summary}
+            hasTranscript={hasTranscript}
+            tasks={tasks}
+            title="Meeting Tasks & Commitments"
+            description="Tasks extracted from this meeting are automatically synchronized with your personal To-Do list."
+            readOnly={readOnly}
+          />
+          {!readOnly && (
+            <ParticipantRecaps
+              tasks={tasks}
+              hasSummary={!!summary}
+              hasTranscript={hasTranscript}
+              hasParticipants={participants.length > 0}
+            />
+          )}
+        </TabsContent>
+
+        <TabsContent value="send_email">
           <EmailTab
             draft={emailDraft}
             hasSummary={!!summary}
-            hasParticipants={participants.length > 0}
-            tasks={tasks}
-            onCompose={() => setEmailOpen(true)}
+            participants={participants}
+            onCompose={openEmail}
             readOnly={readOnly}
           />
         </TabsContent>
@@ -227,6 +269,7 @@ function MeetingDetail() {
         onOpenChange={setEmailOpen}
         draft={emailDraft}
         participants={participants}
+        initialTo={emailTo}
       />
 
       {pip.pipWindow && (
