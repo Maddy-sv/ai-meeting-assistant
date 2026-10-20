@@ -1,11 +1,7 @@
-project_id = "spomtoqvtehipnnlrqtp"
-[functions.project-summary]
-enabled = true
+project_id = "aasrwvttxzmqjlazsvmf"
+
+[functions.send-confirmation]
+verify_jwt = true
+
+[functions.send-reminders]
 verify_jwt = false
-import_map = "./functions/project-summary/deno.json"
-# Uncomment to specify a custom file path to the entrypoint.
-# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
-entrypoint = "./functions/project-summary/index.ts"
-# Specifies static files to be bundled with the function. Supports glob patterns.
-# For example, if you want to serve static HTML pages in your function:
-# static_files = [ "./functions/project-summary/*.html" ]
