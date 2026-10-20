@@ -94,18 +94,6 @@ export async function adminAiUsage(): Promise<AdminAiUsage> {
   return rpcData("admin_ai_usage", await supabase.rpc("admin_ai_usage")) as unknown as AdminAiUsage;
 }
 
-export interface SeedDemoResult {
-  project_id: string;
-  meeting_ids: string[];
-
-  created: boolean;
-}
-
-export async function seedDemoWorkspace(): Promise<SeedDemoResult> {
-  const res = await supabase.rpc("seed_demo_workspace");
-  return rpcData("seed_demo_workspace", res) as unknown as SeedDemoResult;
-}
-
 export type SearchResultKind = "meeting" | "transcript" | "summary" | "task" | "decision";
 
 export interface SearchResult {

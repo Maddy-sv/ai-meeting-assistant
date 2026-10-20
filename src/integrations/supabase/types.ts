@@ -494,7 +494,6 @@ export type Database = {
           snippet: string;
         }[];
       };
-      seed_demo_workspace: { Args: never; Returns: Json };
     };
     Enums: {
       app_role: "admin" | "user";

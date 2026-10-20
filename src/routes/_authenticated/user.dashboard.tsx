@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { endOfDay, endOfWeek, format, isToday, startOfDay } from "date-fns";
 import {
   ArrowRight,
@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   Clock,
   ExternalLink,
-  FlaskConical,
   ListChecks,
   MessageSquare,
   Sparkles,
@@ -20,7 +19,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  ConfirmDialog,
   EmptyState,
   ErrorState,
   LoadingState,
@@ -28,9 +26,8 @@ import {
   StatTile,
   StatusBadge,
 } from "@/components/layout";
-import { notificationKeys, useUnreadNotificationCount } from "@/components/layout/notifications";
+import { useUnreadNotificationCount } from "@/components/layout/notifications";
 import { useDisplayName, useUser } from "@/lib/auth";
-import { seedDemoWorkspace } from "@/lib/rpc";
 import { normalizeMeetingStatus } from "@/components/layout/status";
 
 export const Route = createFileRoute("/_authenticated/user/dashboard")({
@@ -113,7 +110,6 @@ function UserDashboard() {
   const userId = user?.id ?? "";
   const name = useDisplayName();
   const firstName = name.split(" ")[0];
-  const queryClient = useQueryClient();
   const dashboard = useQuery({
     queryKey: dashboardKey(userId),
     queryFn: () => loadDashboard(userId),
@@ -166,22 +162,6 @@ function UserDashboard() {
       ),
     )
     .slice(0, 5);
-
-  async function loadDemo() {
-    const result = await seedDemoWorkspace();
-    if (!result.created) {
-      toast.info("Demo workspace is already loaded.");
-      await queryClient.invalidateQueries({ queryKey: dashboardKey(userId) });
-      return;
-    }
-    toast.success(
-      `Demo workspace added: ${result.meeting_ids.length} sample meetings with transcripts, summaries and tasks.`,
-    );
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: dashboardKey(userId) }),
-      queryClient.invalidateQueries({ queryKey: notificationKeys.all(userId) }),
-    ]);
-  }
 
   return (
     <div className="space-y-8 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-500">
@@ -264,26 +244,13 @@ function UserDashboard() {
         <EmptyState
           icon={Video}
           title="No meetings yet"
-          description="Schedule your first meeting, or load a demo workspace to explore the app. The demo adds sample meetings from the research scenario to your account only."
+          description="Schedule your first meeting or start recording one from the Meetings page."
           action={
-            <>
-              <Button asChild variant="brand">
-                <Link to="/calendar">
-                  <CalendarPlus /> Schedule a meeting
-                </Link>
-              </Button>
-              <ConfirmDialog
-                title="Load the demo workspace?"
-                description="This adds a sample project with two meetings, their transcripts, summaries, tasks and decisions to your account. Nobody else will see them, and you can delete them like any other meeting."
-                confirmLabel="Load demo"
-                onConfirm={loadDemo}
-                trigger={
-                  <Button variant="glass">
-                    <FlaskConical /> Load demo workspace
-                  </Button>
-                }
-              />
-            </>
+            <Button asChild variant="brand">
+              <Link to="/calendar">
+                <CalendarPlus /> Schedule a meeting
+              </Link>
+            </Button>
           }
         />
       )}

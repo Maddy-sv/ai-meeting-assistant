@@ -18,7 +18,6 @@ Built with TanStack Start (React 19), Tailwind CSS v4 + shadcn/ui, Supabase (Pos
 | Search         | Search across meeting titles, transcripts, summaries, tasks and decisions                                                    |
 | Notifications  | In-app bell for summaries and reminders, updated live                                                                        |
 | Admin          | Overview stats, user management (admin role, disable/enable), all meetings, AI usage                                         |
-| Demo           | "Load demo workspace" adds the research paper's two-meeting scenario to your own account                                     |
 
 ## Getting started
 
@@ -75,7 +74,7 @@ docs/                     backend guide and the original product brief
 
 ## Documentation
 
-- [docs/BACKEND.md](docs/BACKEND.md): migrations, secrets, first admin, reminders, demo data, AI limits
+- [docs/BACKEND.md](docs/BACKEND.md): migrations, secrets, first admin, reminders, AI limits
 - [docs/GOOGLE_SETUP.md](docs/GOOGLE_SETUP.md): turning on Google sign-in and calendar import (off by default)
 - [REVAMP_PLAN.md](REVAMP_PLAN.md): audit and revamp plan
 - [docs/ORIGINAL_SPEC.md](docs/ORIGINAL_SPEC.md): the original product brief
