@@ -1,96 +1,140 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Zap, Activity, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { format, parseISO } from "date-fns";
+import { Activity, AlertTriangle, Bot, Timer, Zap } from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  Section,
+  StatTile,
+} from "@/components/layout";
+import { adminAiUsage } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/admin/ai")({
-  head: () => ({ meta: [{ title: "AI Processing — Admin Control Center" }] }),
-  component: AdminAI,
+  head: () => ({ meta: [{ title: "AI usage — Admin — AI Meeting Companion" }] }),
+  component: AdminAi,
 });
 
-function AdminAI() {
-  return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <header className="border-b border-white/5 pb-6">
-        <h1 className="text-3xl font-black tracking-tight flex items-center gap-3">
-          <Zap className="h-8 w-8 text-red-500" />
-          AI Processing Monitor
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Detailed metrics on transcription and AI generation services.
-        </p>
-      </header>
-
-      <div className="grid md:grid-cols-3 gap-6">
-        <div className="glass rounded-2xl p-6 border-blue-500/10">
-          <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-            <Activity className="h-5 w-5 text-blue-400" /> Transcription Engine
-          </h2>
-          <div className="space-y-4">
-            <StatRow label="Jobs Processed" value="1,248" />
-            <StatRow label="Total Audio Hours" value="842h" />
-            <StatRow label="Avg Latency" value="0.8s" color="text-green-400" />
-            <StatRow label="Success Rate" value="99.8%" color="text-green-400" />
-          </div>
-        </div>
-
-        <div className="glass rounded-2xl p-6 border-purple-500/10">
-          <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-            <Zap className="h-5 w-5 text-purple-400" /> Summarization LLM
-          </h2>
-          <div className="space-y-4">
-            <StatRow label="Summaries Generated" value="1,102" />
-            <StatRow label="Tokens Processed" value="4.2M" />
-            <StatRow label="Avg Latency" value="2.4s" color="text-amber-400" />
-            <StatRow label="Success Rate" value="95.2%" color="text-amber-400" />
-          </div>
-        </div>
-
-        <div className="glass rounded-2xl p-6">
-          <h2 className="text-lg font-bold mb-4">Service Health</h2>
-          <div className="space-y-3">
-            <HealthRow label="Google Cloud STT" status="operational" />
-            <HealthRow label="OpenAI GPT-4" status="operational" />
-            <HealthRow label="Anthropic Claude" status="warning" />
-            <HealthRow label="Webhook Receiver" status="operational" />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+function formatMs(ms: number | null | undefined) {
+  if (ms == null) return "—";
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
 }
 
-function StatRow({ label, value, color = "text-foreground" }: any) {
-  return (
-    <div className="flex justify-between items-center text-sm border-b border-white/5 pb-2 last:border-0 last:pb-0">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={`font-mono font-bold ${color}`}>{value}</span>
-    </div>
-  );
-}
+function AdminAi() {
+  const usage = useQuery({ queryKey: ["admin", "ai"], queryFn: adminAiUsage });
+  const u = usage.data;
+  const byFunction = [...(u?.by_function ?? [])].sort((a, b) => b.count - a.count);
+  const daily = u?.daily ?? [];
+  const maxDaily = Math.max(1, ...daily.map((d) => d.count));
 
-function HealthRow({
-  label,
-  status,
-}: {
-  label: string;
-  status: "operational" | "warning" | "error";
-}) {
   return (
-    <div className="flex items-center justify-between p-3 rounded-lg bg-white/5">
-      <span className="text-sm font-medium">{label}</span>
-      {status === "operational" && (
-        <span className="flex items-center gap-1 text-[10px] uppercase text-green-500 font-bold">
-          <CheckCircle2 className="h-3 w-3" /> OK
-        </span>
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Administration"
+        title="AI usage"
+        description="Requests made to the AI model by every server function."
+      />
+
+      {usage.isError ? (
+        <ErrorState message={usage.error.message} onRetry={() => usage.refetch()} />
+      ) : (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <StatTile
+            label="Total requests"
+            icon={Zap}
+            loading={usage.isLoading}
+            value={u?.total ?? 0}
+          />
+          <StatTile label="Today" icon={Activity} loading={usage.isLoading} value={u?.today ?? 0} />
+          <StatTile
+            label="Failures today"
+            icon={AlertTriangle}
+            loading={usage.isLoading}
+            value={u?.failures_today ?? 0}
+          />
+          <StatTile
+            label="Avg duration"
+            icon={Timer}
+            loading={usage.isLoading}
+            value={formatMs(u?.avg_duration_ms)}
+          />
+        </div>
       )}
-      {status === "warning" && (
-        <span className="flex items-center gap-1 text-[10px] uppercase text-amber-500 font-bold">
-          <AlertTriangle className="h-3 w-3" /> Degraded
-        </span>
-      )}
-      {status === "error" && (
-        <span className="flex items-center gap-1 text-[10px] uppercase text-red-500 font-bold">
-          <XCircle className="h-3 w-3" /> Offline
-        </span>
+
+      {usage.isLoading && <LoadingState variant="table" rows={5} label="Loading AI usage…" />}
+
+      {u && (
+        <div className="grid gap-6 xl:grid-cols-2">
+          <Section title="By function">
+            {byFunction.length === 0 ? (
+              <EmptyState icon={Bot} title="No AI requests recorded yet" />
+            ) : (
+              <div className="glass overflow-x-auto rounded-2xl">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border hover:bg-transparent">
+                      <TableHead>Function</TableHead>
+                      <TableHead className="text-right">Requests</TableHead>
+                      <TableHead className="text-right">Failures</TableHead>
+                      <TableHead className="text-right">Failure rate</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {byFunction.map((f) => (
+                      <TableRow key={f.fn} className="border-border">
+                        <TableCell className="font-mono text-xs">{f.fn}</TableCell>
+                        <TableCell className="text-right tabular-nums">{f.count}</TableCell>
+                        <TableCell
+                          className={
+                            "text-right tabular-nums " + (f.failures > 0 ? "text-destructive" : "")
+                          }
+                        >
+                          {f.failures}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {f.count ? `${Math.round((f.failures / f.count) * 100)}%` : "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </Section>
+
+          <Section title="Last 14 days" description="Requests per day.">
+            {daily.length === 0 ? (
+              <EmptyState icon={Activity} title="No activity in the last 14 days" />
+            ) : (
+              <ul className="glass space-y-2 rounded-2xl p-5" aria-label="Requests per day">
+                {daily.map((d) => (
+                  <li key={d.day} className="flex items-center gap-3 text-sm">
+                    <span className="w-16 shrink-0 text-xs text-muted-foreground">
+                      {format(parseISO(d.day), "d MMM")}
+                    </span>
+                    <span className="h-3 flex-1 overflow-hidden rounded-full bg-muted">
+                      <span
+                        className="block h-full rounded-full bg-chart-1"
+                        style={{ width: `${(d.count / maxDaily) * 100}%` }}
+                      />
+                    </span>
+                    <span className="w-10 shrink-0 text-right tabular-nums">{d.count}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+        </div>
       )}
     </div>
   );

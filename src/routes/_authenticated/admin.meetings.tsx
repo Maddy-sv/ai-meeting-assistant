@@ -1,128 +1,189 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Video, Search, CheckCircle2, Activity } from "lucide-react";
+import { useMemo, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { format } from "date-fns";
+import { CheckCircle2, Search, Video } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  StatusBadge,
+  statusLabel,
+} from "@/components/layout";
+import { adminListMeetings } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/admin/meetings")({
-  head: () => ({ meta: [{ title: "Meeting Management — Admin Control Center" }] }),
+  head: () => ({ meta: [{ title: "Meetings — Admin — AI Meeting Companion" }] }),
   component: AdminMeetings,
 });
 
+const ALL = "all";
+
 function AdminMeetings() {
-  const dummyMeetings = [
-    {
-      id: "m1",
-      title: "Product Sync",
-      host: "Sumeet M",
-      duration: "30m",
-      status: "completed",
-      ai_status: "processed",
-      date: "2026-08-20",
-    },
-    {
-      id: "m2",
-      title: "Marketing Kickoff",
-      host: "Jane Doe",
-      duration: "1h 15m",
-      status: "completed",
-      ai_status: "processed",
-      date: "2026-08-19",
-    },
-    {
-      id: "m3",
-      title: "Design Review",
-      host: "John Smith",
-      duration: "-",
-      status: "upcoming",
-      ai_status: "pending",
-      date: "2026-08-21",
-    },
-    {
-      id: "m4",
-      title: "Weekly Standup",
-      host: "Emily Chen",
-      duration: "15m",
-      status: "completed",
-      ai_status: "failed",
-      date: "2026-08-19",
-    },
-    {
-      id: "m5",
-      title: "Client Demo",
-      host: "Michael Scott",
-      duration: "45m",
-      status: "live",
-      ai_status: "processing",
-      date: "2026-08-20",
-    },
-  ];
+  const meetings = useQuery({ queryKey: ["admin", "meetings"], queryFn: adminListMeetings });
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState<string>(ALL);
+
+  const statuses = useMemo(
+    () => Array.from(new Set((meetings.data ?? []).map((m) => m.status))).sort(),
+    [meetings.data],
+  );
+
+  const filtered = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return (meetings.data ?? []).filter((m) => {
+      if (status !== ALL && m.status !== status) return false;
+      if (!term) return true;
+      return (
+        m.title.toLowerCase().includes(term) ||
+        (m.host_name ?? "").toLowerCase().includes(term) ||
+        (m.host_email ?? "").toLowerCase().includes(term)
+      );
+    });
+  }, [meetings.data, q, status]);
+
+  const filtering = q.trim() !== "" || status !== ALL;
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <header className="border-b border-white/5 pb-6">
-        <h1 className="text-3xl font-black tracking-tight flex items-center gap-3">
-          <Video className="h-8 w-8 text-red-500" />
-          Meeting Management
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Monitor platform meetings and AI processing status.
-        </p>
-      </header>
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Administration"
+        title="Meetings"
+        description="Every meeting across all workspaces."
+      />
 
-      <div className="glass rounded-2xl p-6 border-red-500/10">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-bold">All Meetings</h2>
-          <div className="flex bg-black/20 rounded-lg px-3 py-1.5 items-center gap-2 border border-white/5">
-            <Search className="h-4 w-4 text-muted-foreground" />
-            <input
-              placeholder="Search meetings..."
-              className="bg-transparent text-sm outline-none w-64"
-            />
-          </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:max-w-sm">
+          <label htmlFor="meeting-search" className="sr-only">
+            Search meetings by title or host
+          </label>
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="meeting-search"
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by title or host…"
+            className="glass rounded-full pl-9"
+          />
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="text-xs uppercase bg-white/5 text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 rounded-tl-lg">Meeting Title</th>
-                <th className="px-4 py-3">Host</th>
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Duration</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 rounded-tr-lg">AI Processing</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dummyMeetings.map((m) => (
-                <tr
-                  key={m.id}
-                  className="border-b border-white/5 hover:bg-white/5 transition-colors"
-                >
-                  <td className="px-4 py-3 font-medium text-foreground">{m.title}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{m.host}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{m.date}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{m.duration}</td>
-                  <td className="px-4 py-3">
-                    <span className="capitalize text-[10px] font-bold tracking-wider px-2 py-1 rounded-full bg-white/5">
-                      {m.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`text-xs flex items-center w-fit gap-1 px-2 py-1 rounded-full ${m.ai_status === "processed" ? "bg-green-500/20 text-green-400" : m.ai_status === "failed" ? "bg-red-500/20 text-red-400" : "bg-amber-500/20 text-amber-400"}`}
-                    >
-                      {m.ai_status === "processed" ? (
-                        <CheckCircle2 className="h-3 w-3" />
-                      ) : (
-                        <Activity className="h-3 w-3" />
-                      )}
-                      <span className="capitalize font-bold">{m.ai_status}</span>
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="glass w-44 rounded-full" aria-label="Filter by status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>All statuses</SelectItem>
+            {statuses.map((s) => (
+              <SelectItem key={s} value={s}>
+                {statusLabel(s)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {filtering && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setQ("");
+              setStatus(ALL);
+            }}
+          >
+            Clear filters
+          </Button>
+        )}
+        {meetings.data && (
+          <span className="text-sm text-muted-foreground">
+            {filtered.length} of {meetings.data.length} meetings
+          </span>
+        )}
       </div>
+
+      {meetings.isLoading && <LoadingState variant="table" rows={6} label="Loading meetings…" />}
+      {meetings.isError && (
+        <ErrorState message={meetings.error.message} onRetry={() => meetings.refetch()} />
+      )}
+      {meetings.data && filtered.length === 0 && (
+        <EmptyState
+          icon={Video}
+          title={filtering ? "No meetings match these filters" : "No meetings yet"}
+        />
+      )}
+
+      {filtered.length > 0 && (
+        <div className="glass overflow-x-auto rounded-2xl">
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead>Meeting</TableHead>
+                <TableHead>Host</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Scheduled</TableHead>
+                <TableHead className="text-right">Transcript lines</TableHead>
+                <TableHead>Summary</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map((m) => (
+                <TableRow key={m.id} className="border-border">
+                  <TableCell className="min-w-48">
+                    <Link
+                      to="/meetings/$id"
+                      params={{ id: m.id }}
+                      className="font-medium hover:underline"
+                    >
+                      {m.title}
+                    </Link>
+                    <div className="text-xs text-muted-foreground">
+                      Created {format(new Date(m.created_at), "d MMM yyyy")}
+                    </div>
+                  </TableCell>
+                  <TableCell className="min-w-40">
+                    <div>{m.host_name || "Unnamed user"}</div>
+                    <div className="text-xs text-muted-foreground">{m.host_email}</div>
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge status={m.status} />
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {m.scheduled_at
+                      ? format(new Date(m.scheduled_at), "d MMM yyyy, HH:mm")
+                      : "Not scheduled"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{m.transcript_count}</TableCell>
+                  <TableCell>
+                    {m.has_summary ? (
+                      <span className="inline-flex items-center gap-1 text-sm text-success">
+                        <CheckCircle2 className="h-4 w-4" /> Ready
+                      </span>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">None</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
     </div>
   );
 }
