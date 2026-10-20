@@ -40,15 +40,16 @@ export function EditTranscriptDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="rounded-full">
-          <Pencil className="h-4 w-4" /> Edit or paste
+          <Pencil className="h-4 w-4" /> Edit Script
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Edit or paste the transcript</DialogTitle>
+          <DialogTitle>Edit / Paste Meeting Transcript</DialogTitle>
           <DialogDescription>
-            Use one line per turn, written as <code>Speaker: text</code>. The text is cleaned up and
-            replaces the current transcript.
+            Use one line per turn, written as <code>Speaker: text</code>. Gemini AI fixes
+            speech-to-text typos, attributes each line to the right speaker and replaces the current
+            transcript. The summary and action items are then refreshed.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
@@ -76,7 +77,7 @@ export function EditTranscriptDialog({
             ) : (
               <Wand2 className="h-4 w-4" />
             )}
-            Clean and save
+            Clean &amp; Re-align with AI
           </Button>
         </DialogFooter>
       </DialogContent>

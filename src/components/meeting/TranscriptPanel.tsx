@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { Loader2, Maximize2, Mic, MessageSquareText, Wand2 } from "lucide-react";
+import { Download, Loader2, Maximize2, Mic, MessageSquareText, Wand2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { MeetingRecording } from "@/hooks/use-meeting-recording";
 import type { MeetingTranscriptEdits } from "@/hooks/use-meeting-transcript-edits";
@@ -7,7 +8,7 @@ import { CopyTranscriptMenu } from "./CopyTranscriptMenu";
 import { EditTranscriptDialog } from "./EditTranscriptDialog";
 import { TranscriptMessage } from "./TranscriptMessage";
 import type { Meeting, Participant, Transcript } from "./types";
-import { isSameName } from "./utils";
+import { REMOTE_PARTICIPANT_LABEL, downloadTranscript, isGenericRemote, isSameName } from "./utils";
 
 export function TranscriptPanel({
   meeting,
@@ -39,6 +40,18 @@ export function TranscriptPanel({
   const isHost = (speaker: string) =>
     isSameName(speaker, hostName) || ["you", "host"].includes(speaker.trim().toLowerCase());
 
+  const remotes = participants.filter((p) => !isHost(p.name) && p.role !== "host");
+  const remoteName =
+    remotes.find((p) => !isGenericRemote(p.name))?.name ||
+    remotes[0]?.name ||
+    REMOTE_PARTICIPANT_LABEL;
+
+  function download() {
+    if (!downloadTranscript(meeting, transcripts)) {
+      toast.info("There is no transcript to download yet.");
+    }
+  }
+
   return (
     <section
       aria-labelledby="transcript-heading"
@@ -48,7 +61,7 @@ export function TranscriptPanel({
         <div className="flex items-center gap-2">
           <MessageSquareText className="h-4 w-4 text-primary" aria-hidden />
           <h2 id="transcript-heading" className="text-sm font-semibold">
-            Transcript
+            {live ? "Live Chat Transcription" : "Transcript"}
           </h2>
           <span className="text-xs text-muted-foreground">
             {transcripts.length} message{transcripts.length === 1 ? "" : "s"}
@@ -69,7 +82,7 @@ export function TranscriptPanel({
                 ) : (
                   <Wand2 className="h-4 w-4" />
                 )}
-                Clean up with AI
+                {edits.cleaning ? "Cleaning..." : "AI Clean & Fix"}
               </Button>
               <EditTranscriptDialog
                 transcripts={transcripts}
@@ -78,18 +91,32 @@ export function TranscriptPanel({
               />
             </>
           )}
-          <CopyTranscriptMenu meeting={meeting} transcripts={transcripts} size="sm" />
-          {live && (
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8 rounded-full"
-              onClick={onOpenPip}
-              aria-label="Open floating transcript window"
-            >
-              <Maximize2 className="h-4 w-4" />
-            </Button>
-          )}
+          <CopyTranscriptMenu
+            meeting={meeting}
+            transcripts={transcripts}
+            size="sm"
+            label="Copy All"
+          />
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 rounded-full"
+            onClick={download}
+            aria-label="Download transcript"
+            title="Download transcript"
+          >
+            <Download className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-full"
+            onClick={onOpenPip}
+            aria-label="Pop out floating transcript window"
+            title="Open an always-on-top floating window over your meeting tab"
+          >
+            <Maximize2 className="h-4 w-4" /> Pop-out
+          </Button>
         </div>
       </div>
 
@@ -106,8 +133,8 @@ export function TranscriptPanel({
                 : live
                   ? "Start speaking. Each finished sentence is saved here."
                   : meeting.status === "completed"
-                    ? "Nothing was recorded for this meeting. You can paste a transcript with Edit or paste."
-                    : "Press Start recording to transcribe this meeting, or paste a transcript."}
+                    ? "Nothing was recorded for this meeting. You can paste a transcript with Edit Script."
+                    : "Click Join as AI Assistant above to begin, or paste a transcript with Edit Script. Spoken words from you and remote participants appear here as chat bubbles."}
             </p>
           </div>
         ) : (
@@ -119,6 +146,7 @@ export function TranscriptPanel({
                 isHost={isHost(t.speaker)}
                 hostName={hostName}
                 participants={participants}
+                swapTarget={isHost(t.speaker) ? remoteName : hostName}
                 onSetSpeaker={edits.setSpeaker}
                 onSplit={edits.splitMessage}
                 onDelete={edits.deleteMessage}

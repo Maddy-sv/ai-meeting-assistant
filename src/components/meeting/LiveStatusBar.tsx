@@ -53,7 +53,7 @@ export function LiveStatusBar({
               className={`border-transparent ${recording.hasTabAudio ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}
             >
               <MonitorUp className="mr-1.5 h-3 w-3" />
-              {recording.hasTabAudio ? "Tab audio shared" : "No tab audio shared"}
+              {recording.hasTabAudio ? "Tab Audio Synced" : "No tab audio shared"}
             </Badge>
             <Button
               size="sm"

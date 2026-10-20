@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { CopyFormat, Meeting, Transcript } from "./types";
-import { copyText, downloadTextFile, formatTranscripts } from "./utils";
+import { copyText, downloadTranscript, formatTranscripts } from "./utils";
 
 const FORMATS: { format: CopyFormat; label: string }[] = [
   { format: "formatted", label: "With timestamps" },
@@ -23,10 +23,12 @@ export function CopyTranscriptMenu({
   meeting,
   transcripts,
   size = "default",
+  label = "Copy Transcripts",
 }: {
   meeting: Meeting | null;
   transcripts: Transcript[];
   size?: "default" | "sm";
+  label?: string;
 }) {
   const [copied, setCopied] = useState(false);
   const empty = transcripts.length === 0;
@@ -43,18 +45,13 @@ export function CopyTranscriptMenu({
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-    toast.success("Transcript copied.");
+    toast.success("Transcript copied to clipboard.");
   }
 
   function download() {
-    if (empty) {
+    if (!downloadTranscript(meeting, transcripts)) {
       toast.info("There is no transcript to download yet.");
-      return;
     }
-    downloadTextFile(
-      `${meeting?.title || "meeting"}-transcript.txt`,
-      formatTranscripts(transcripts, "formatted", meeting),
-    );
   }
 
   return (
@@ -66,7 +63,7 @@ export function CopyTranscriptMenu({
           ) : (
             <Copy className="h-4 w-4" />
           )}
-          {copied ? "Copied" : "Copy / export"}
+          {copied ? "Copied All!" : label}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
