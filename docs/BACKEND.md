@@ -47,6 +47,7 @@ The last migration is safe to run more than once.
 | `GEMINI_MODEL`                                                   | app server, optional        | Model to use (default `gemini-3.5-flash`)                                                     |
 | `GEMINI_FALLBACK_MODEL`                                          | app server, optional        | One fallback model (default `gemini-3.5-flash-lite`; `none` disables)                         |
 | `AI_DAILY_LIMIT`                                                 | app server, optional        | AI requests per user per UTC day (default 200)                                                |
+| `AI_TRANSCRIBE_DAILY_LIMIT`                                      | app server, optional        | Live tab-audio transcription clips per user per UTC day (default 2000)                        |
 | `RESEND_API_KEY`                                                 | edge secret                 | Sending email                                                                                 |
 | `EMAIL_FROM`                                                     | edge secret, optional       | Sender, e.g. `Meeting Companion <noreply@your-domain>`; defaults to the Resend sandbox sender |
 | `ALLOWED_ORIGINS`                                                | edge secret, optional       | Comma-separated origins allowed to call `send-confirmation` (defaults to localhost dev ports) |
@@ -121,6 +122,7 @@ No demo content is ever created automatically.
   - has an overall deadline of about 25 seconds.
 - Every call is logged in `ai_usage` with the function, model, success flag and duration.
 - When a user reaches `AI_DAILY_LIMIT` calls in a UTC day, further calls fail with "Daily AI limit reached. Try again tomorrow."
+- Live tab-audio transcription (`transcribeRemoteAudio`, one call per ~12 second clip, so roughly 300 calls per hour of meeting) is still logged in `ai_usage` but does **not** count towards `AI_DAILY_LIMIT`. It has its own cap, `AI_TRANSCRIBE_DAILY_LIMIT` (default 2000 clips per user per UTC day), so a long meeting can never use up the allowance the end-of-meeting summary needs.
 - Input limits:
   - audio clips up to 15 MB;
   - screenshots up to 4 MB each, at most 3;
