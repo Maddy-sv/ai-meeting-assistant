@@ -18,15 +18,19 @@ Apply the files in `supabase/migrations/` in filename order:
    - `chat_messages` and `ai_usage`;
    - the admin RPCs, `search_workspace` and `seed_demo_workspace`;
    - realtime publication.
+6. `20261020130000_meeting_status.sql`:
+   - `meetings.status` is limited to `upcoming`, `live` or `completed` (old `in_progress` rows become `live`, unknown values become `upcoming`);
+   - `is_active_user()`: disabled accounts can still read their own data but cannot insert, update or delete it;
+   - `my_open_task_count()` for the dashboard.
 
 How to apply them:
 
 - **Supabase CLI:** run `supabase db push` against the linked project.
 - **Dashboard or Lovable:** paste each file into the SQL editor in the order above.
 
-The last migration is safe to run more than once.
+The last two migrations are safe to run more than once.
 
-### What the last migration changes for existing data
+### What the revamp migrations change for existing data
 
 - Action-item statuses are normalised: `completed` becomes `done`, and unknown values become `pending`.
 - `assignee_user_id` is backfilled when the free-text assignee **exactly** matches one user's full name or email (case-insensitive) and the match is unique.
@@ -36,6 +40,7 @@ The last migration is safe to run more than once.
   - or a participant of that meeting whose email belongs to an account.
 - Assignees can see their tasks and change **only** the status.
 - Admins can read all meetings and records. They change other users' data only through the `admin_*` RPCs.
+- Meeting statuses are normalised as described in step 6, and disabled users become read-only.
 
 ## 2. Environment variables and secrets (names only)
 
