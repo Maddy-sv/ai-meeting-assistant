@@ -1,13 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import {
-  STABLE_TASK_IDS,
-  getStableTaskId,
+  canonicalTaskKey,
   normalizeDecisionText,
   deduplicateDecisions,
   reconcileCrossMeetingTasks,
   buildVerifiedCumulativeSummary,
   confirmsCompletion,
+  deadlineMentionedFor,
+  isPlaceholderAssignee,
+  normalizeAssignee,
   safeFormatDeadline,
   resolveDeadlineToDate,
   resolveDeadlineToISODate,
@@ -15,510 +17,319 @@ import {
   type DecisionRecord,
 } from "./continuous-memory.ts";
 
-describe("Continuous Meeting Memory & Cross-Meeting Task Synchronization", () => {
-  describe("1. Task completion updates across sequential meetings", () => {
-    it("updates status from pending in Meeting 1 to done when Meeting 2 confirms completion", () => {
-      const meetings = [
-        { id: "m1", title: "Sprint Sync New1", scheduled_at: "2026-10-01T10:00:00Z" },
-        { id: "m2", title: "Sprint Review New2", scheduled_at: "2026-10-03T10:00:00Z" },
-      ];
+const M1 = { id: "m1", title: "Sync 1", scheduled_at: "2026-10-01T10:00:00Z" };
+const M2 = { id: "m2", title: "Sync 2", scheduled_at: "2026-10-03T10:00:00Z" };
 
-      // Meeting 1 assigned dashboard and UI testing as pending
-      const meetingActions: Record<string, ActionItemRecord[]> = {
-        m1: [
-          {
-            id: STABLE_TASK_IDS.dashboard,
-            meeting_id: "m1",
-            title: "Complete & finalize project dashboard",
-            assignee: "Sumeet Made",
-            deadline: "Wednesday",
-            status: "pending",
-          },
-          {
-            id: STABLE_TASK_IDS.ui_testing,
-            meeting_id: "m1",
-            title: "Handle UI improvements and QA testing",
-            assignee: "Remote Participant",
-            deadline: "Tuesday evening",
-            status: "pending",
-          },
-        ],
-        // In Meeting 2, explicit status is done
-        m2: [
-          {
-            id: STABLE_TASK_IDS.dashboard,
-            meeting_id: "m2",
-            title: "Complete & finalize project dashboard",
-            assignee: "Sumeet Made",
-            deadline: "Wednesday",
-            status: "done",
-          },
-          {
-            id: STABLE_TASK_IDS.ui_testing,
-            meeting_id: "m2",
-            title: "Handle UI improvements and QA testing",
-            assignee: "Shreyash",
-            deadline: "Friday",
-            status: "done",
-          },
-        ],
-      };
-
-      const { reconciledTasks, historicalRecords } = reconcileCrossMeetingTasks(
-        meetings,
-        meetingActions,
-      );
-
-      const dashboardTask = reconciledTasks.find((t) => t.id === STABLE_TASK_IDS.dashboard);
-      const uiTask = reconciledTasks.find((t) => t.id === STABLE_TASK_IDS.ui_testing);
-
-      // Current reconciled status must be updated to done
-      assert.ok(dashboardTask, "Dashboard task should exist");
-      assert.strictEqual(dashboardTask.status, "done", "Dashboard task should be marked done");
-
-      assert.ok(uiTask, "UI task should exist");
-      assert.strictEqual(uiTask.status, "done", "UI task should be marked done");
-      assert.strictEqual(uiTask.assignee, "Shreyash", "Assignee should be resolved to Shreyash");
-
-      // Crucial: Meeting 1 historical record remains intact (pending)
-      assert.strictEqual(
-        historicalRecords.m1[0].status,
-        "pending",
-        "Historical meeting 1 status must remain pending",
-      );
-      assert.strictEqual(
-        historicalRecords.m2[0].status,
-        "done",
-        "Historical meeting 2 status is done",
-      );
-    });
-
-    it("updates status to done when context/transcript confirms completion even if earlier item was pending", () => {
-      const meetings = [
-        { id: "m1", title: "New1", scheduled_at: "2026-10-01T10:00:00Z" },
-        { id: "m2", title: "New2", scheduled_at: "2026-10-03T10:00:00Z" },
-      ];
-
-      const meetingActions = {
-        m1: [
-          {
-            id: STABLE_TASK_IDS.dashboard,
-            meeting_id: "m1",
-            title: "Complete & finalize project dashboard",
-            assignee: "Sumeet Made",
-            deadline: "Wednesday",
-            status: "pending",
-          },
-        ],
-        m2: [], // no explicit action row in m2
-      };
-
-      const meetingContexts = {
-        m1: { summary: "Sumeet will work on dashboard" },
-        m2: { summary: "Project dashboard completed and verified with Shreyash" },
-      };
-
-      const { reconciledTasks } = reconcileCrossMeetingTasks(
-        meetings,
-        meetingActions,
-        meetingContexts,
-      );
-      const dashboard = reconciledTasks.find((t) => t.id === STABLE_TASK_IDS.dashboard);
-      assert.ok(dashboard);
-      assert.strictEqual(
-        dashboard.status,
-        "done",
-        "Should be updated to done based on meeting 2 verification",
-      );
-    });
+describe("canonicalTaskKey", () => {
+  it("is stable across case, punctuation, stopwords and simple plurals", () => {
+    assert.strictEqual(
+      canonicalTaskKey("Finalize the project dashboard!"),
+      canonicalTaskKey("finalize project dashboards"),
+    );
+    assert.strictEqual(
+      canonicalTaskKey("Share the dashboard"),
+      canonicalTaskKey("Shared dashboard"),
+    );
+    assert.match(canonicalTaskKey("Write API docs"), /^task:[a-z0-9-]+$/);
   });
 
-  describe("2. Pending-task retention (Friday review commitment)", () => {
-    it("strictly preserves the Friday review commitment across subsequent meetings until completed", () => {
-      const meetings = [
-        { id: "m1", title: "New1", scheduled_at: "2026-10-01T10:00:00Z" },
-        { id: "m2", title: "New2", scheduled_at: "2026-10-03T10:00:00Z" },
-      ];
+  it("can ignore participant names so reassigned tasks still match", () => {
+    assert.strictEqual(
+      canonicalTaskKey("Send report to Remote Participant", ["Remote Participant"]),
+      canonicalTaskKey("Send report to Jamie Doe", ["Jamie Doe"]),
+    );
+  });
 
-      const meetingActions = {
+  it("never returns an empty key", () => {
+    assert.strictEqual(canonicalTaskKey("   "), "task:untitled");
+  });
+});
+
+describe("Task completion across sequential meetings", () => {
+  it("marks a task done when a later meeting's record says done, keeping history intact", () => {
+    const meetingActions: Record<string, ActionItemRecord[]> = {
+      m1: [
+        {
+          id: "row-1",
+          meeting_id: "m1",
+          title: "Finalize project dashboard",
+          assignee: "Host",
+          deadline: "Wednesday",
+          status: "pending",
+          canonical_key: "task:dashboard",
+        },
+        {
+          id: "row-2",
+          meeting_id: "m1",
+          title: "UI improvements and QA testing",
+          assignee: "Remote Participant",
+          deadline: "Friday",
+          status: "pending",
+          canonical_key: "task:ui",
+        },
+      ],
+      m2: [
+        {
+          id: "row-3",
+          meeting_id: "m2",
+          title: "Finalize project dashboard",
+          assignee: "Host",
+          deadline: "Wednesday",
+          status: "done",
+          canonical_key: "task:dashboard",
+        },
+        {
+          id: "row-4",
+          meeting_id: "m2",
+          title: "UI improvements and QA testing",
+          assignee: "Teammate",
+          deadline: "Friday",
+          status: "done",
+          canonical_key: "task:ui",
+        },
+      ],
+    };
+
+    const { reconciledTasks, historicalRecords, conflicts } = reconcileCrossMeetingTasks(
+      [M2, M1],
+      meetingActions,
+    );
+
+    const dashboard = reconciledTasks.find((t) => t.canonical_key === "task:dashboard");
+    const ui = reconciledTasks.find((t) => t.canonical_key === "task:ui");
+    assert.ok(dashboard && ui);
+    assert.strictEqual(reconciledTasks.length, 2);
+    assert.strictEqual(dashboard.status, "done");
+    assert.strictEqual(dashboard.id, "row-3", "id points at the latest row");
+    assert.strictEqual(dashboard.last_confirmed_meeting_id, "m2");
+    assert.strictEqual(ui.status, "done");
+    assert.strictEqual(ui.assignee, "Teammate", "a real name replaces a placeholder");
+    assert.strictEqual(conflicts.length, 0, "placeholder -> name is not a conflict");
+    assert.strictEqual(historicalRecords.m1[0].status, "pending");
+    assert.strictEqual(historicalRecords.m2[0].status, "done");
+  });
+
+  it("marks a task done when a later discussion confirms it", () => {
+    const { reconciledTasks } = reconcileCrossMeetingTasks(
+      [M1, M2],
+      {
         m1: [
           {
-            id: STABLE_TASK_IDS.joint_review,
             meeting_id: "m1",
-            title: "Joint review of all completed deliverables",
-            assignee: "Remote Participant & Sumeet Made",
+            title: "Complete the project dashboard",
+            assignee: "Host",
+            status: "pending",
+          },
+        ],
+        m2: [],
+      },
+      {
+        m1: { summary: "The host will work on the project dashboard." },
+        m2: { summary: "The project dashboard has been completed and verified." },
+      },
+    );
+    assert.strictEqual(reconciledTasks[0].status, "done");
+    assert.strictEqual(reconciledTasks[0].last_confirmed_meeting_id, "m2");
+  });
+
+  it("does not treat negated or future statements as completion", () => {
+    assert.strictEqual(
+      confirmsCompletion("The dashboard is not completed yet.", "Finish dashboard"),
+      false,
+    );
+    assert.strictEqual(
+      confirmsCompletion("We'll review once the dashboard is done.", "Finish dashboard"),
+      false,
+    );
+    assert.strictEqual(
+      confirmsCompletion("The only thing left is the review of completed work.", "Joint review"),
+      false,
+    );
+    assert.strictEqual(
+      confirmsCompletion("Yes, the dashboard has been completed.", "Finish dashboard"),
+      true,
+    );
+    assert.strictEqual(
+      confirmsCompletion("The budget report has been completed.", "Finish dashboard"),
+      false,
+      "unrelated tasks are not matched",
+    );
+  });
+
+  it("keeps a pending task pending until something confirms it", () => {
+    const { reconciledTasks } = reconcileCrossMeetingTasks(
+      [M1, M2],
+      {
+        m1: [
+          {
+            meeting_id: "m1",
+            title: "Joint review of deliverables",
+            assignee: "Host",
             deadline: "Friday",
             status: "pending",
           },
         ],
         m2: [],
-      };
-
-      const { reconciledTasks } = reconcileCrossMeetingTasks(meetings, meetingActions);
-      const reviewTask = reconciledTasks.find((t) => t.id === STABLE_TASK_IDS.joint_review);
-
-      assert.ok(reviewTask, "Friday review task must be retained");
-      assert.strictEqual(reviewTask.status, "pending", "Review commitment must remain pending");
-      assert.strictEqual(reviewTask.deadline, "Friday", "Deadline Friday must be preserved");
-      assert.strictEqual(reviewTask.is_commitment, true, "Must be flagged as active commitment");
-    });
-
-    it("retains Friday review in buildVerifiedCumulativeSummary even if omitted from explicit action list", () => {
-      const meetings = [{ id: "m1", title: "New1", scheduled_at: "2026-10-01T10:00:00Z" }];
-      const summaries = [{ meeting_id: "m1", executive_summary: "Discussed sprint plans" }];
-      const actions: ActionItemRecord[] = [];
-      const decisions: DecisionRecord[] = [];
-
-      const result = buildVerifiedCumulativeSummary(
-        { id: "p1", name: "AI Companion" },
-        meetings,
-        summaries,
-        actions,
-        decisions,
-      );
-
-      const pendingReview = result.verified_pending.find(
-        (t) => t.canonical_key === "task:joint_review",
-      );
-      assert.ok(pendingReview, "Friday joint review must be included in pending deliverables");
-      assert.strictEqual(pendingReview.deadline, "Friday");
-      assert.ok(
-        result.suggested_agenda.some(
-          (a) => a.toLowerCase().includes("joint review") || a.toLowerCase().includes("friday"),
-        ),
-        "Suggested agenda must include the Friday review commitment",
-      );
-    });
+      },
+      { m2: { summary: "Discussed the release plan." } },
+    );
+    assert.strictEqual(reconciledTasks.length, 1);
+    assert.strictEqual(reconciledTasks[0].status, "pending");
+    assert.strictEqual(reconciledTasks[0].deadline, "Friday");
+    assert.strictEqual(reconciledTasks[0].is_commitment, true);
   });
 
-  describe("3. Deadline changes & conflict detection", () => {
-    it("detects and flags conflicting deadlines between meeting discussion and action item", () => {
-      const meetings = [{ id: "m1", title: "New1", scheduled_at: "2026-10-01T10:00:00Z" }];
+  it("unifies rows without stored keys by their derived key", () => {
+    const { reconciledTasks } = reconcileCrossMeetingTasks([M1, M2], {
+      m1: [{ meeting_id: "m1", title: "Prepare the release notes", status: "pending" }],
+      m2: [{ meeting_id: "m2", title: "prepare release notes", status: "done" }],
+    });
+    assert.strictEqual(reconciledTasks.length, 1);
+    assert.strictEqual(reconciledTasks[0].status, "done");
+  });
+});
 
-      const meetingActions = {
+describe("Conflict detection", () => {
+  it("flags a deadline that differs between discussion and record without overwriting it", () => {
+    const { reconciledTasks, conflicts } = reconcileCrossMeetingTasks(
+      [M1],
+      {
         m1: [
           {
-            id: STABLE_TASK_IDS.ui_testing,
             meeting_id: "m1",
-            title: "Handle UI improvements and QA testing",
+            title: "UI improvements and QA testing",
             assignee: "Remote Participant",
-            deadline: "Friday", // Action item says Friday
+            deadline: "Friday",
             status: "pending",
           },
         ],
-      };
-
-      const meetingContexts = {
+      },
+      {
         m1: {
-          summary:
-            "Team agreed that Remote Participant will complete UI improvements by Tuesday evening.",
-          key_points: ["UI improvements due by Tuesday evening"],
+          summary: "The team agreed the UI improvements and QA testing are due Tuesday evening.",
         },
-      };
-
-      const { reconciledTasks, conflicts } = reconcileCrossMeetingTasks(
-        meetings,
-        meetingActions,
-        meetingContexts,
-      );
-
-      assert.ok(conflicts.length > 0, "Must detect at least one conflict");
-      const deadlineConflict = conflicts.find((c) => c.field === "deadline");
-      assert.ok(deadlineConflict, "Must detect deadline conflict");
-      assert.strictEqual(
-        deadlineConflict.evidence.length,
-        2,
-        "Must retain evidence from both sources",
-      );
-      assert.strictEqual(deadlineConflict.evidence[0].value, "Tuesday evening");
-      assert.strictEqual(deadlineConflict.evidence[1].value, "Friday");
-
-      // The task itself holds the conflict and adopts the latest confirmed discussion deadline
-      const uiTask = reconciledTasks.find((t) => t.id === STABLE_TASK_IDS.ui_testing);
-      assert.ok(uiTask);
-      assert.strictEqual(uiTask.deadline, "Tuesday evening");
-      assert.strictEqual(uiTask.conflicts.length, 1);
-    });
+      },
+    );
+    assert.strictEqual(conflicts.length, 1);
+    assert.strictEqual(conflicts[0].field, "deadline");
+    assert.deepStrictEqual(
+      conflicts[0].evidence.map((e) => e.value),
+      ["Tuesday evening", "Friday"],
+    );
+    assert.strictEqual(reconciledTasks[0].deadline, "Friday", "record is kept");
+    assert.strictEqual(reconciledTasks[0].conflicts.length, 1);
   });
 
-  describe("4. Strategic decision deduplication", () => {
-    it("deduplicates identical decisions across meetings while preserving distinct decisions", () => {
-      const rawDecisions: DecisionRecord[] = [
-        {
-          id: "d1",
-          meeting_id: "m1",
-          description: "Prioritize and complete the project dashboard by Wednesday.",
-          made_by: "Both Participants",
-        },
-        // Duplicate with different punctuation/casing
-        {
-          id: "d2",
-          meeting_id: "m1",
-          description: "prioritize and complete the project dashboard by Wednesday",
-          made_by: "Both Participants",
-        },
-        // Distinct decision 1
-        {
-          id: "d3",
-          meeting_id: "m1",
-          description: "Finalize UI improvements and QA testing by Tuesday evening.",
-          made_by: "Both Participants",
-        },
-        // Duplicate in meeting 2
-        {
-          id: "d4",
-          meeting_id: "m2",
-          description: "Prioritize and complete the project dashboard by Wednesday.",
-          made_by: "Both Participants",
-        },
-        // Distinct decision 2
-        {
-          id: "d5",
-          meeting_id: "m2",
-          description: "Perform joint QA verification and finalize all project deliverables.",
-          made_by: "Both Participants",
-        },
-      ];
-
-      const deduplicated = deduplicateDecisions(rawDecisions);
-
-      // Should have exactly 3 distinct decisions:
-      // 1. Prioritize dashboard by Wednesday
-      // 2. Finalize UI improvements by Tuesday evening
-      // 3. Perform joint QA verification and finalize all project deliverables
-      assert.strictEqual(
-        deduplicated.length,
-        3,
-        "Must reduce to exactly 3 unique strategic decisions",
-      );
-
-      const descList = deduplicated.map((d) => d.description);
-      assert.ok(
-        descList.some((d) => d.includes("dashboard")),
-        "Must preserve dashboard decision",
-      );
-      assert.ok(
-        descList.some((d) => d.includes("UI improvements")),
-        "Must preserve UI improvements decision",
-      );
-      assert.ok(
-        descList.some((d) => d.includes("joint QA verification")),
-        "Must preserve QA verification decision",
-      );
+  it("flags an assignee change between two named people", () => {
+    const { conflicts, reconciledTasks } = reconcileCrossMeetingTasks([M1, M2], {
+      m1: [{ meeting_id: "m1", title: "Draft budget", assignee: "Avery", status: "pending" }],
+      m2: [{ meeting_id: "m2", title: "Draft budget", assignee: "Blake", status: "pending" }],
     });
-
-    it("does not delete distinct decisions that have similar wording", () => {
-      const decisions: DecisionRecord[] = [
-        { id: "1", description: "Review project frontend changes on Wednesday" },
-        { id: "2", description: "Review project backend changes on Wednesday" },
-      ];
-
-      const result = deduplicateDecisions(decisions);
-      assert.strictEqual(
-        result.length,
-        2,
-        "Distinct frontend vs backend decisions must both be preserved",
-      );
-    });
+    assert.strictEqual(conflicts.length, 1);
+    assert.strictEqual(conflicts[0].field, "assignee");
+    assert.strictEqual(reconciledTasks[0].assignee, "Blake");
   });
 
-  describe("5. Grounded cumulative summaries & anti-hallucination verification", () => {
-    it("generates cumulative progress report containing only verified records", () => {
-      const meetings = [
-        { id: "m1", title: "New1", scheduled_at: "2026-10-01T10:00:00Z" },
-        { id: "m2", title: "New2", scheduled_at: "2026-10-03T10:00:00Z" },
-      ];
+  it("finds the deadline stated for a task in discussion text", () => {
+    assert.strictEqual(
+      deadlineMentionedFor("We will ship the landing page by Thursday.", "Ship landing page"),
+      "Thursday",
+    );
+    assert.strictEqual(deadlineMentionedFor("No dates were set.", "Ship landing page"), null);
+  });
+});
 
-      const summaries = [
-        {
-          meeting_id: "m1",
-          executive_summary: "Sumeet Made will prioritize dashboard; UI testing assigned.",
-        },
-        {
-          meeting_id: "m2",
-          executive_summary:
-            "Project dashboard and UI improvements both confirmed complete with Shreyash.",
-        },
-      ];
-
-      const actions: ActionItemRecord[] = [
-        {
-          id: STABLE_TASK_IDS.dashboard,
-          meeting_id: "m1",
-          title: "Complete & finalize project dashboard",
-          assignee: "Sumeet Made",
-          deadline: "Wednesday",
-          status: "pending",
-        },
-        {
-          id: STABLE_TASK_IDS.dashboard,
-          meeting_id: "m2",
-          title: "Complete & finalize project dashboard",
-          assignee: "Sumeet Made",
-          deadline: "Wednesday",
-          status: "done",
-        },
-        {
-          id: STABLE_TASK_IDS.ui_testing,
-          meeting_id: "m2",
-          title: "Handle UI improvements and QA testing",
-          assignee: "Shreyash",
-          deadline: "Friday",
-          status: "done",
-        },
-        {
-          id: STABLE_TASK_IDS.joint_review,
-          meeting_id: "m1",
-          title: "Joint review of all completed deliverables",
-          assignee: "Shreyash & Sumeet Made",
-          deadline: "Friday",
-          status: "pending",
-        },
-      ];
-
-      const decisions: DecisionRecord[] = [
-        {
-          id: "d1",
-          meeting_id: "m1",
-          description: "Prioritize dashboard by Wednesday",
-        },
-        {
-          id: "d2",
-          meeting_id: "m2",
-          description: "Prioritize dashboard by Wednesday", // Duplicate
-        },
-      ];
-
-      const summary = buildVerifiedCumulativeSummary(
-        { id: "p1", name: "AI Meeting Companion" },
-        meetings,
-        summaries,
-        actions,
-        decisions,
-      );
-
-      // Verify Completed Deliverables
-      assert.strictEqual(
-        summary.verified_completed.length >= 2,
-        true,
-        "Must have at least 2 verified completed tasks",
-      );
-      assert.ok(
-        summary.verified_completed.some((t) => t.id === STABLE_TASK_IDS.dashboard),
-        "Dashboard must be verified completed",
-      );
-      assert.ok(
-        summary.verified_completed.some((t) => t.id === STABLE_TASK_IDS.ui_testing),
-        "UI testing must be verified completed",
-      );
-
-      // Verify Pending Deliverables
-      assert.ok(
-        summary.verified_pending.some((t) => t.id === STABLE_TASK_IDS.joint_review),
-        "Joint review must remain verified pending",
-      );
-
-      // Verify Decisions
-      assert.strictEqual(
-        summary.verified_decisions.length,
-        1,
-        "Decision must be deduplicated to 1",
-      );
-
-      // Verify Report content
-      assert.ok(summary.progress_report.includes("Verified Completed Deliverables:"));
-      assert.ok(summary.progress_report.includes("Complete & finalize project dashboard"));
-      assert.ok(summary.progress_report.includes("Outstanding Deliverables & Commitments:"));
-      assert.ok(summary.progress_report.includes("Joint review of all completed deliverables"));
-
-      // Verify Agenda
-      assert.ok(summary.suggested_agenda.some((a) => a.toLowerCase().includes("joint review")));
-    });
+describe("Decision deduplication", () => {
+  it("removes duplicates and keeps distinct decisions", () => {
+    const raw: DecisionRecord[] = [
+      { id: "d1", description: "Prioritize the dashboard by Wednesday." },
+      { id: "d2", description: "prioritize the dashboard by Wednesday" },
+      { id: "d3", description: "Finish QA testing by Friday." },
+      { id: "d4", description: "Prioritize the dashboard by Wednesday.", made_by: "Team" },
+    ];
+    const result = deduplicateDecisions(raw);
+    assert.strictEqual(result.length, 2);
+    assert.strictEqual(result[0].made_by, "Team", "made_by is enriched from a duplicate");
   });
 
-  describe("6. Canonical task identification & deduplication across meetings", () => {
-    it("correctly maps dashboard sharing tasks to STABLE_TASK_IDS.share rather than dashboard", () => {
-      const shareTask = getStableTaskId(
-        "Share completed dashboard with Remote Participant for review",
-      );
-      assert.strictEqual(shareTask.id, STABLE_TASK_IDS.share);
-      assert.strictEqual(shareTask.key, "task:share");
+  it("keeps similarly worded but different decisions", () => {
+    const result = deduplicateDecisions([
+      { description: "Review frontend changes on Wednesday" },
+      { description: "Review backend changes on Wednesday" },
+    ]);
+    assert.strictEqual(result.length, 2);
+    assert.strictEqual(normalizeDecisionText("  Hello, World! "), "hello world");
+  });
+});
 
-      const dashboardTask = getStableTaskId("Complete & finalize project dashboard");
-      assert.strictEqual(dashboardTask.id, STABLE_TASK_IDS.dashboard);
-      assert.strictEqual(dashboardTask.key, "task:dashboard");
-    });
-
-    it("deduplicates duplicate task rows across meetings into single reconciled entity", () => {
-      const meetings = [
-        { id: "m1", title: "Sprint Meeting 1", scheduled_at: "2026-10-01T10:00:00Z" },
-        { id: "m2", title: "Sprint Meeting 2", scheduled_at: "2026-10-03T10:00:00Z" },
-      ];
-
-      const meetingActions: Record<string, ActionItemRecord[]> = {
-        m1: [
-          {
-            id: "uuid-row-1",
-            meeting_id: "m1",
-            title: "Share completed dashboard with Remote Participant for review",
-            assignee: "Sumeet Made",
-            deadline: "Wednesday",
-            status: "pending",
-          },
-        ],
-        m2: [
-          {
-            id: "uuid-row-2",
-            meeting_id: "m2",
-            title: "Share completed dashboard with Shreyash for review",
-            assignee: "Sumeet Made",
-            deadline: "Wednesday",
-            status: "done",
-          },
-        ],
-      };
-
-      const { reconciledTasks } = reconcileCrossMeetingTasks(meetings, meetingActions);
-      const shareTasks = reconciledTasks.filter((t) => t.canonical_key === "task:share");
-      assert.strictEqual(
-        shareTasks.length,
-        1,
-        "Duplicate share task rows must be unified into exactly 1 reconciled task",
-      );
-      assert.strictEqual(
-        shareTasks[0].status,
-        "done",
-        "Status must reflect completion in Meeting 2",
-      );
-    });
+describe("Grounded cumulative summary", () => {
+  it("reports only what the records contain", () => {
+    const actions: ActionItemRecord[] = [
+      { meeting_id: "m1", title: "Finalize dashboard", assignee: "Host", status: "pending" },
+      { meeting_id: "m2", title: "Finalize dashboard", assignee: "Host", status: "done" },
+      {
+        meeting_id: "m2",
+        title: "Joint review of deliverables",
+        assignee: "Host",
+        deadline: "2026-10-09",
+        status: "pending",
+      },
+    ];
+    const decisions: DecisionRecord[] = [
+      { meeting_id: "m1", description: "Ship on Friday" },
+      { meeting_id: "m2", description: "Ship on Friday" },
+    ];
+    const s = buildVerifiedCumulativeSummary(
+      { id: "p1", name: "Website" },
+      [M1, M2],
+      [{ meeting_id: "m1", executive_summary: "Planning." }],
+      actions,
+      decisions,
+    );
+    assert.strictEqual(s.verified_completed.length, 1);
+    assert.strictEqual(s.verified_pending.length, 1);
+    assert.strictEqual(s.verified_decisions.length, 1);
+    assert.ok(s.progress_report.includes("Finalize dashboard"));
+    assert.ok(s.progress_report.includes("Joint review of deliverables"));
+    assert.ok(s.suggested_agenda[0].includes("Joint review of deliverables"));
   });
 
-  describe("7. Concrete calendar date resolution for deadlines", () => {
-    it("converts relative day names like Wednesday and Friday into real calendar dates", () => {
-      const refDate = "2026-10-16T10:00:00Z"; // Friday 16 Oct 2026
+  it("does not invent tasks when there are none", () => {
+    const s = buildVerifiedCumulativeSummary({ id: "p1", name: "Empty" }, [M1], [], [], []);
+    assert.strictEqual(s.verified_pending.length, 0);
+    assert.strictEqual(s.verified_completed.length, 0);
+    assert.strictEqual(s.suggested_agenda.length, 0);
+  });
+});
 
-      const wedFormatted = safeFormatDeadline("Wednesday", refDate);
-      assert.strictEqual(wedFormatted, "21 Oct 2026", "Wednesday must be formatted as 21 Oct 2026");
+describe("Assignees", () => {
+  it("recognises placeholders and normalises names", () => {
+    assert.strictEqual(isPlaceholderAssignee("Remote Participant"), true);
+    assert.strictEqual(isPlaceholderAssignee("Speaker 2"), true);
+    assert.strictEqual(isPlaceholderAssignee("Avery"), false);
+    assert.strictEqual(normalizeAssignee("  Avery   Lee "), "Avery Lee");
+    assert.strictEqual(normalizeAssignee("   "), null);
+  });
+});
 
-      const friFormatted = safeFormatDeadline("Friday", refDate);
-      assert.strictEqual(friFormatted, "16 Oct 2026", "Friday must be formatted as 16 Oct 2026");
+describe("Deadline resolution", () => {
+  const ref = "2026-10-16T10:00:00Z"; // a Friday
 
-      const tueFormatted = safeFormatDeadline("Tuesday evening", refDate);
-      assert.strictEqual(
-        tueFormatted,
-        "20 Oct 2026",
-        "Tuesday evening must be formatted as 20 Oct 2026",
-      );
+  it("turns weekday names into calendar dates", () => {
+    assert.strictEqual(safeFormatDeadline("Wednesday", ref), "21 Oct 2026");
+    assert.strictEqual(safeFormatDeadline("Friday", ref), "16 Oct 2026");
+    assert.strictEqual(safeFormatDeadline("Tuesday evening", ref), "20 Oct 2026");
+    assert.strictEqual(safeFormatDeadline("2026-11-05", ref), "5 Nov 2026");
+    assert.strictEqual(safeFormatDeadline(null, ref), "No deadline");
+    assert.strictEqual(safeFormatDeadline("someday", ref), "someday");
+  });
 
-      const directFormatted = safeFormatDeadline("2026-11-05", refDate);
-      assert.strictEqual(directFormatted, "5 Nov 2026", "Direct date must be formatted nicely");
-    });
-
-    it("converts weekday strings to ISO YYYY-MM-DD format for database and input fields", () => {
-      const refDate = "2026-10-16T10:00:00Z"; // Friday 16 Oct 2026
-      assert.strictEqual(resolveDeadlineToISODate("Wednesday", refDate), "2026-10-21");
-      assert.strictEqual(resolveDeadlineToISODate("Friday", refDate), "2026-10-16");
-      assert.strictEqual(resolveDeadlineToISODate("Tuesday evening", refDate), "2026-10-20");
-    });
+  it("produces YYYY-MM-DD dates", () => {
+    assert.strictEqual(resolveDeadlineToISODate("Wednesday", ref), "2026-10-21");
+    assert.strictEqual(resolveDeadlineToISODate("Friday", ref), "2026-10-16");
+    assert.strictEqual(resolveDeadlineToISODate("Tuesday evening", ref), "2026-10-20");
+    assert.strictEqual(resolveDeadlineToISODate("2026-11-05", ref), "2026-11-05");
+    assert.strictEqual(resolveDeadlineToISODate("not a date", ref), null);
+    assert.strictEqual(resolveDeadlineToDate("Tuesday evening", ref)?.getHours(), 18);
   });
 });

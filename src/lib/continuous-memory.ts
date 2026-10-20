@@ -1,25 +1,21 @@
 /**
- * Continuous Meeting Memory & Cross-Meeting Task Synchronization Engine
+ * Continuous Meeting Memory (CMM)
  *
- * Guarantees:
- * 1. Persisted meeting records and action items are treated as the source of truth.
- * 2. Stable task identifiers across meetings prevent duplication and ensure seamless updates.
- * 3. Later meeting confirmations of completion reliably update current status to "done".
- * 4. Genuinely pending tasks (including Friday review commitments) are preserved until completed/cancelled.
- * 5. Strategic decisions are deduplicated by normalized text while preserving distinct decisions.
- * 6. Cumulative summaries are strictly grounded in verified meeting records without fabricated progress.
- * 7. Conflicting records retain evidence and are flagged rather than silently overwritten.
- * 8. Meeting-level historical records remain intact while updating the current reconciled task status.
+ * Deterministic, data-agnostic helpers that track tasks across a series of
+ * meetings:
+ * 1. Persisted meeting records and action items are the source of truth.
+ * 2. Tasks are matched across meetings by a canonical key (stored in
+ *    action_items.canonical_key, or derived from the title).
+ * 3. A later meeting that confirms completion marks the reconciled task done,
+ *    while each meeting's own records stay untouched.
+ * 4. Pending tasks stay pending until a record or discussion confirms them.
+ * 5. Decisions are deduplicated by normalised text; distinct ones are kept.
+ * 6. Cumulative summaries contain only facts from the records.
+ * 7. Conflicting deadlines/assignees are flagged with evidence, never
+ *    silently overwritten.
  */
 
-export const STABLE_TASK_IDS = {
-  dashboard: "6972938e-0001-4000-8000-000000000001",
-  share: "6972938e-0002-4000-8000-000000000002",
-  ui_testing: "6972938e-0003-4000-8000-000000000003",
-  joint_review: "6972938e-0004-4000-8000-000000000004",
-} as const;
-
-export type TaskStatus = "pending" | "in_progress" | "done" | "completed";
+export type TaskStatus = "pending" | "in_progress" | "done";
 
 export interface ActionItemRecord {
   id?: string;
@@ -28,6 +24,7 @@ export interface ActionItemRecord {
   assignee?: string | null;
   deadline?: string | null;
   status: string;
+  canonical_key?: string | null;
   created_at?: string;
 }
 
@@ -40,7 +37,7 @@ export interface DecisionRecord {
 }
 
 export interface ConflictRecord {
-  task_id?: string;
+  task_key?: string;
   field: "deadline" | "status" | "assignee";
   description: string;
   evidence: Array<{
@@ -50,12 +47,13 @@ export interface ConflictRecord {
 }
 
 export interface ReconciledTask {
+  /** id of the most recent action_items row for this task (or the key if none) */
   id: string;
   canonical_key: string;
   title: string;
   assignee: string | null;
   deadline: string | null;
-  status: "pending" | "done";
+  status: TaskStatus;
   origin_meeting_id: string;
   last_confirmed_meeting_id: string;
   is_commitment: boolean;
@@ -69,15 +67,16 @@ export interface ReconciledTask {
   }>;
 }
 
-export interface MeetingContext {
+export interface MeetingRef {
   id: string;
   title: string;
   scheduled_at?: string | null;
+}
+
+export interface MeetingContextText {
   summary?: string;
-  key_points?: string[];
   transcript?: string;
-  actions?: ActionItemRecord[];
-  decisions?: DecisionRecord[];
+  key_points?: string[];
 }
 
 export interface CumulativeSummaryResult {
@@ -89,66 +88,109 @@ export interface CumulativeSummaryResult {
   conflicts: ConflictRecord[];
 }
 
-/**
- * Resolves a task title to a canonical stable identifier and canonical key.
- */
-export function getStableTaskId(title: string, existingId?: string): { id: string; key: string } {
-  const lower = (title || "").toLowerCase().trim();
+// ---------------------------------------------------------------------------
+// Canonical task keys
+// ---------------------------------------------------------------------------
 
-  // Check share FIRST so "Share completed dashboard..." resolves to task:share
-  if (
-    lower.includes("share") &&
-    (lower.includes("dashboard") ||
-      lower.includes("review") ||
-      lower.includes("participant") ||
-      lower.includes("shreyash"))
-  ) {
-    return { id: STABLE_TASK_IDS.share, key: "task:share" };
-  }
-  if (
-    lower.includes("dashboard") &&
-    (lower.includes("complete") || lower.includes("finalize") || lower.includes("project"))
-  ) {
-    return { id: STABLE_TASK_IDS.dashboard, key: "task:dashboard" };
-  }
-  if (
-    lower.includes("ui improvement") ||
-    lower.includes("ui improvements") ||
-    lower.includes("qa testing") ||
-    lower.includes("ui testing")
-  ) {
-    return { id: STABLE_TASK_IDS.ui_testing, key: "task:ui_testing" };
-  }
-  if (
-    lower.includes("joint review") ||
-    lower.includes("friday review") ||
-    (lower.includes("review") && lower.includes("deliverables"))
-  ) {
-    return { id: STABLE_TASK_IDS.joint_review, key: "task:joint_review" };
-  }
-  if (lower.includes("registration") || lower.includes("participant list")) {
-    return { id: existingId || "custom-registration-task", key: "task:registration" };
-  }
-  if (lower.includes("decoration") && lower.includes("event")) {
-    return { id: existingId || "custom-decoration-task", key: "task:decoration" };
-  }
+const STOPWORDS = new Set([
+  "a",
+  "an",
+  "the",
+  "and",
+  "or",
+  "of",
+  "for",
+  "to",
+  "with",
+  "by",
+  "on",
+  "in",
+  "at",
+  "all",
+  "any",
+  "our",
+  "your",
+  "their",
+  "his",
+  "her",
+  "its",
+  "this",
+  "that",
+  "these",
+  "those",
+  "be",
+  "is",
+  "are",
+  "will",
+  "it",
+  "up",
+]);
 
-  // Canonical slug for custom tasks
-  const slug = lower
-    .replace(/remote participant|matthew smith/gi, "shreyash")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 48);
+/** Very small suffix stripper so "share"/"shared"/"sharing" compare equal. */
+function stem(word: string): string {
+  let w = word;
+  if (w.length > 5 && w.endsWith("ing")) w = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith("ies")) w = w.slice(0, -3) + "y";
+  else if (w.length > 4 && w.endsWith("ed")) w = w.slice(0, -2);
+  else if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) w = w.slice(0, -1);
+  if (w.length > 3 && w.endsWith("e")) w = w.slice(0, -1);
+  return w;
+}
 
-  return {
-    id: existingId || `custom-${slug || "task"}-${Math.abs(hashString(lower))}`,
-    key: `task:${slug || "generic"}`,
-  };
+/** Significant, stemmed words of a text (used for keys and matching). */
+export function significantWords(text: string, ignore: string[] = []): string[] {
+  const ignored = new Set(
+    ignore
+      .flatMap((n) => n.toLowerCase().split(/[^a-z0-9]+/))
+      .filter(Boolean)
+      .map(stem),
+  );
+  return (text || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w && !STOPWORDS.has(w))
+    .map(stem)
+    .filter((w) => !ignored.has(w));
 }
 
 /**
- * Resolves any deadline representation (e.g. "Wednesday", "Friday", "Tuesday evening", "2026-10-21")
- * into a concrete Date object relative to referenceDate.
+ * Derives a stable canonical key for a task title, e.g.
+ * "Finalize the project dashboard" -> "task:finalize-project-dashboard".
+ * Words in `ignore` (typically participant names) are left out so the same
+ * task assigned to differently-named people still matches.
+ */
+export function canonicalTaskKey(title: string, ignore: string[] = []): string {
+  const words = significantWords(title, ignore);
+  const slug = words.join("-").slice(0, 64).replace(/-+$/, "");
+  return `task:${slug || "untitled"}`;
+}
+
+function keyOf(a: ActionItemRecord, ignore: string[] = []): string {
+  const stored = (a.canonical_key || "").trim();
+  return stored || canonicalTaskKey(a.title, ignore);
+}
+
+// ---------------------------------------------------------------------------
+// Deadlines
+// ---------------------------------------------------------------------------
+
+const WEEKDAYS: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+const WEEKDAY_RE =
+  /\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(\s+(morning|afternoon|evening|night))?\b/i;
+
+/**
+ * Resolves a deadline ("Wednesday", "Tuesday evening", "2026-11-05", an ISO
+ * timestamp) to a Date. Weekdays resolve to their next occurrence on or after
+ * `referenceDate`. Returns null when the value cannot be understood.
  */
 export function resolveDeadlineToDate(
   val?: string | null,
@@ -158,49 +200,45 @@ export function resolveDeadlineToDate(
   const str = String(val).trim();
   if (!str) return null;
 
-  // Direct date parse (e.g. "2026-10-21", ISO string, or Date formatted string)
-  if (!/^(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(\s+evening)?$/i.test(str)) {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str);
+  if (dateOnly) {
+    const d = new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 17);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  const weekday = WEEKDAY_RE.exec(str);
+  if (!weekday || /\d/.test(str)) {
     const parsed = new Date(str);
     if (!isNaN(parsed.getTime())) return parsed;
   }
-
-  const dayMap: Record<string, number> = {
-    sunday: 0,
-    monday: 1,
-    tuesday: 2,
-    wednesday: 3,
-    thursday: 4,
-    friday: 5,
-    saturday: 6,
-  };
+  if (!weekday) return null;
 
   const ref = referenceDate ? new Date(referenceDate) : new Date();
-  const base = !isNaN(ref.getTime()) ? ref : new Date();
-  const lower = str.toLowerCase();
-
-  for (const [dayName, dayNum] of Object.entries(dayMap)) {
-    if (lower.includes(dayName)) {
-      const cur = base.getDay();
-      let diff = dayNum - cur;
-      if (diff < 0) diff += 7; // Next occurrence
-      const target = new Date(base);
-      target.setDate(base.getDate() + diff);
-      if (lower.includes("evening")) {
-        target.setHours(18, 0, 0, 0);
-      } else {
-        target.setHours(17, 0, 0, 0);
-      }
-      return target;
-    }
-  }
-
-  return null;
+  const base = isNaN(ref.getTime()) ? new Date() : ref;
+  const target = new Date(base);
+  const diff = (WEEKDAYS[weekday[1].toLowerCase()] - base.getDay() + 7) % 7;
+  target.setDate(base.getDate() + diff);
+  const part = (weekday[3] || "").toLowerCase();
+  const hour = part === "morning" ? 9 : part === "afternoon" ? 14 : part ? 18 : 17;
+  target.setHours(hour, 0, 0, 0);
+  return target;
 }
 
-/**
- * Formats a deadline into a clean, human-readable concrete date string (e.g. "21 Oct 2026").
- * Replaces weekday strings with concrete calendar dates.
- */
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** Converts a deadline to a local calendar date string YYYY-MM-DD, or null. */
+export function resolveDeadlineToISODate(
+  val?: string | null,
+  referenceDate?: string | Date | null,
+): string | null {
+  const d = resolveDeadlineToDate(val, referenceDate);
+  if (!d || isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Human-readable deadline, e.g. "21 Oct 2026". */
 export function safeFormatDeadline(
   val?: string | null,
   referenceDate?: string | Date | null,
@@ -216,139 +254,162 @@ export function safeFormatDeadline(
   return String(val);
 }
 
-/**
- * Converts any deadline to an ISO Date string YYYY-MM-DD.
- */
-export function resolveDeadlineToISODate(
-  val?: string | null,
-  referenceDate?: string | Date | null,
-): string | null {
-  const d = resolveDeadlineToDate(val, referenceDate);
-  if (d && !isNaN(d.getTime())) {
-    return d.toISOString().split("T")[0];
-  }
-  return null;
-}
+// ---------------------------------------------------------------------------
+// Decisions
+// ---------------------------------------------------------------------------
 
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
-  }
-  return hash;
-}
-
-/**
- * Normalizes decision description text for deduplication while preserving distinct meanings.
- */
 export function normalizeDecisionText(text: string): string {
   if (!text) return "";
   return text
     .toLowerCase()
-    .replace(/[.,/#!$%^&*;:{}=\-_`~()?"']/g, "") // remove punctuation
-    .replace(/\s+/g, " ") // normalize spacing
+    .replace(/[.,/#!$%^&*;:{}=\-_`~()?"']/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-/**
- * Deduplicates decisions across meetings or within a single meeting.
- * Ensures distinct decisions (e.g. Dashboard deadline vs UI testing review) are NOT deleted.
- */
-export function deduplicateDecisions(decisions: DecisionRecord[]): DecisionRecord[] {
-  const seen = new Map<string, DecisionRecord>();
-
+/** Removes decisions with identical normalised text; keeps distinct ones. */
+export function deduplicateDecisions<T extends DecisionRecord>(decisions: T[]): T[] {
+  const seen = new Map<string, T>();
   for (const d of decisions) {
     const norm = normalizeDecisionText(d.description);
     if (!norm) continue;
-
-    if (!seen.has(norm)) {
-      seen.set(norm, {
-        ...d,
-        description: d.description.trim(),
-      });
-    } else {
-      // If previously seen without made_by and now has made_by, enrich it
-      const existing = seen.get(norm)!;
-      if (!existing.made_by && d.made_by) {
-        existing.made_by = d.made_by;
-      }
+    const existing = seen.get(norm);
+    if (!existing) {
+      seen.set(norm, { ...d, description: d.description.trim() });
+    } else if (!existing.made_by && d.made_by) {
+      existing.made_by = d.made_by;
     }
   }
-
   return Array.from(seen.values());
 }
 
-/**
- * Normalizes participant assignees, resolving placeholders when actual name is known.
- */
-export function normalizeAssignee(raw?: string | null, knownRemoteName = "Shreyash"): string {
-  if (!raw || !raw.trim()) return "Unassigned";
-  let clean = raw.trim();
-  const lower = clean.toLowerCase();
+// ---------------------------------------------------------------------------
+// Assignees
+// ---------------------------------------------------------------------------
 
-  if (lower.includes("remote participant") || lower.includes("matthew smith")) {
-    clean = clean.replace(/Remote Participant|Matthew Smith/gi, knownRemoteName);
-  }
-  return clean;
+const PLACEHOLDER_ASSIGNEE =
+  /^(remote( participant)?|participant( \d+)?|speaker( \d+)?|unknown|unassigned|someone|tbd|n\/a)$/i;
+
+/** True for generic speaker labels such as "Remote Participant" or "Speaker 2". */
+export function isPlaceholderAssignee(name?: string | null): boolean {
+  const n = (name || "").trim();
+  return !n || PLACEHOLDER_ASSIGNEE.test(n);
+}
+
+/** Trims an assignee; empty values become null. */
+export function normalizeAssignee(raw?: string | null): string | null {
+  const clean = (raw || "").replace(/\s+/g, " ").trim();
+  return clean || null;
+}
+
+// ---------------------------------------------------------------------------
+// Completion detection
+// ---------------------------------------------------------------------------
+
+const COMPLETION_RE =
+  /\b(completed?|finished|done|shipped|delivered|wrapped up|closed|resolved|implemented|deployed|merged)\b/i;
+// Sentences that negate, defer or make completion conditional are ignored.
+const NEGATION_RE =
+  /(\b(not|never|yet to|still|pending|in progress|remain\w*|left|outstanding|incomplete|will|shall|going to|plan to|planning to|should|need to|needs to|once|after|when|until|before|let's|lets)\b|n't\b|'ll\b)/i;
+
+function splitSentences(text: string): string[] {
+  return (text || "")
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function mentionsTask(sentence: string, taskWords: string[]): boolean {
+  if (taskWords.length === 0) return false;
+  const words = new Set(significantWords(sentence));
+  const hits = taskWords.filter((w) => words.has(w)).length;
+  const needed = taskWords.length <= 2 ? taskWords.length : Math.ceil(taskWords.length * 0.6);
+  return hits >= needed;
+}
+
+/** Words that describe the work itself; completion verbs are excluded. */
+function taskSubjectWords(title: string, ignore: string[] = []): string[] {
+  const generic = new Set(
+    significantWords(
+      "complete completed finish finished finalize do done handle work task make prepare get",
+    ),
+  );
+  return Array.from(new Set(significantWords(title, ignore).filter((w) => !generic.has(w))));
 }
 
 /**
- * Checks whether text confirms completion of a task.
+ * Returns true if `text` contains a sentence that refers to the task and
+ * states that it is complete (and is not negated or future tense).
  */
-export function confirmsCompletion(text: string, taskKey: string): boolean {
-  const lower = (text || "").toLowerCase();
-  if (taskKey === "task:dashboard") {
-    return (
-      lower.includes("dashboard completed") ||
-      lower.includes("dashboard has been completed") ||
-      lower.includes("completed the dashboard") ||
-      lower.includes("finalized the project dashboard") ||
-      lower.includes("dashboard and ui improvements have both been completed") ||
-      lower.includes("dashboard completed and verified")
-    );
-  }
-  if (taskKey === "task:ui_testing") {
-    return (
-      lower.includes("ui improvements have been completed") ||
-      lower.includes("ui improvements and qa testing completed") ||
-      lower.includes("ui improvements completed") ||
-      lower.includes("completed ui improvements") ||
-      lower.includes("dashboard and ui improvements have both been completed") ||
-      lower.includes("reported complete in meeting 2")
-    );
-  }
-  if (taskKey === "task:share") {
-    return (
-      lower.includes("shared completed dashboard") ||
-      lower.includes("shared dashboard") ||
-      lower.includes("share completed")
-    );
-  }
-  return false;
+export function confirmsCompletion(
+  text: string,
+  taskTitle: string,
+  ignore: string[] = [],
+): boolean {
+  const subject = taskSubjectWords(taskTitle, ignore);
+  return splitSentences(text).some(
+    (s) => COMPLETION_RE.test(s) && !NEGATION_RE.test(s) && mentionsTask(s, subject),
+  );
 }
 
+/** Finds a deadline phrase stated for the task in the discussion text. */
+export function deadlineMentionedFor(
+  text: string,
+  taskTitle: string,
+  ignore: string[] = [],
+): string | null {
+  const subject = taskSubjectWords(taskTitle, ignore);
+  for (const s of splitSentences(text)) {
+    if (!mentionsTask(s, subject)) continue;
+    const iso = /\b\d{4}-\d{2}-\d{2}\b/.exec(s);
+    if (iso) return iso[0];
+    const wd = WEEKDAY_RE.exec(s);
+    if (wd) {
+      const phrase = wd[0].toLowerCase();
+      return phrase.charAt(0).toUpperCase() + phrase.slice(1);
+    }
+  }
+  return null;
+}
+
+function normalizeStatus(raw: string): TaskStatus {
+  const s = (raw || "").toLowerCase().trim();
+  if (s === "done" || s === "completed" || s === "complete") return "done";
+  if (s === "in_progress" || s === "in-progress" || s === "in progress") return "in_progress";
+  return "pending";
+}
+
+function sameDeadline(a: string | null, b: string | null, ref?: string | null): boolean {
+  if (!a || !b) return true;
+  const da = resolveDeadlineToISODate(a, ref);
+  const db = resolveDeadlineToISODate(b, ref);
+  if (da && db) return da === db;
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliation
+// ---------------------------------------------------------------------------
+
 /**
- * Reconciles tasks across sequential meetings.
+ * Reconciles tasks across meetings in chronological order.
+ * - Keeps each meeting's records intact (historicalRecords).
+ * - Marks a task done when a later record or discussion confirms completion.
+ * - Flags deadline/assignee conflicts with evidence instead of overwriting.
  *
- * - Preserves meeting-level historical records intact.
- * - Updates the current reconciled status to "done" when confirmed in later meetings.
- * - Preserves genuinely pending tasks (like Friday review commitments).
- * - Detects conflicting deadlines or assignees and retains the evidence.
+ * `ignoreWords` (e.g. participant names) are excluded from derived keys.
  */
 export function reconcileCrossMeetingTasks(
-  meetings: Array<{ id: string; title: string; scheduled_at?: string | null }>,
+  meetings: MeetingRef[],
   meetingActions: Record<string, ActionItemRecord[]>,
-  meetingContexts: Record<
-    string,
-    { summary?: string; transcript?: string; key_points?: string[] }
-  > = {},
+  meetingContexts: Record<string, MeetingContextText> = {},
+  ignoreWords: string[] = [],
 ): {
   reconciledTasks: ReconciledTask[];
   conflicts: ConflictRecord[];
   historicalRecords: Record<string, ActionItemRecord[]>;
 } {
-  // Sort meetings chronologically
-  const sortedMeetings = [...meetings].sort((a, b) => {
+  const sorted = [...meetings].sort((a, b) => {
     const da = a.scheduled_at ? new Date(a.scheduled_at).getTime() : 0;
     const db = b.scheduled_at ? new Date(b.scheduled_at).getTime() : 0;
     return da - db;
@@ -358,162 +419,122 @@ export function reconcileCrossMeetingTasks(
   const allConflicts: ConflictRecord[] = [];
   const historicalRecords: Record<string, ActionItemRecord[]> = {};
 
-  for (let mIdx = 0; mIdx < sortedMeetings.length; mIdx++) {
-    const meeting = sortedMeetings[mIdx];
+  for (const meeting of sorted) {
     const actions = meetingActions[meeting.id] || [];
     const ctx = meetingContexts[meeting.id] || {};
-    const contextText = `${ctx.summary || ""} ${ctx.transcript || ""} ${(ctx.key_points || []).join(" ")}`;
-
-    // Store historical snapshot of this meeting's actions intact
+    const contextText = [ctx.summary || "", ctx.transcript || "", ...(ctx.key_points || [])].join(
+      "\n",
+    );
     historicalRecords[meeting.id] = actions.map((a) => ({ ...a }));
 
-    // Detect if this meeting has specific participants
-    const hasShreyash =
-      contextText.toLowerCase().includes("shreyash") ||
-      meeting.title.toLowerCase().includes("new2");
-    const remoteName = hasShreyash ? "Shreyash" : "Remote Participant";
-
-    // 1. Process explicit action items in this meeting
     for (const a of actions) {
-      const { id: stableId, key: taskKey } = getStableTaskId(a.title, a.id);
-      const isReviewCommitment =
-        taskKey === "task:joint_review" || a.title.toLowerCase().includes("friday");
-
-      let currentAssignee = normalizeAssignee(a.assignee, remoteName);
-      let currentDeadline = a.deadline || null;
-      let rawStatus = (a.status || "").toLowerCase().trim();
-      let isDone = rawStatus === "done" || rawStatus === "completed";
-
-      // Check if meeting discussion confirms completion
-      if (!isDone && confirmsCompletion(contextText, taskKey)) {
-        isDone = true;
+      const key = keyOf(a, ignoreWords);
+      const assignee = normalizeAssignee(a.assignee);
+      const deadline = a.deadline || null;
+      let status = normalizeStatus(a.status);
+      if (status !== "done" && confirmsCompletion(contextText, a.title, ignoreWords)) {
+        status = "done";
       }
 
-      if (!taskMap.has(taskKey)) {
-        // First time seeing this task
-        const newTask: ReconciledTask = {
-          id: stableId,
-          canonical_key: taskKey,
+      const existing = taskMap.get(key);
+      if (!existing) {
+        const task: ReconciledTask = {
+          id: a.id || key,
+          canonical_key: key,
           title: a.title,
-          assignee: currentAssignee,
-          deadline: currentDeadline,
-          status: isDone ? "done" : "pending",
+          assignee,
+          deadline,
+          status,
           origin_meeting_id: meeting.id,
           last_confirmed_meeting_id: meeting.id,
-          is_commitment: isReviewCommitment,
+          is_commitment: /\breview\b/i.test(a.title),
           conflicts: [],
           history: [
-            {
-              meeting_id: meeting.id,
-              meeting_title: meeting.title,
-              status: isDone ? "done" : "pending",
-              deadline: currentDeadline,
-              assignee: currentAssignee,
-            },
+            { meeting_id: meeting.id, meeting_title: meeting.title, status, deadline, assignee },
           ],
         };
 
-        // Check for in-meeting deadline conflicts (e.g. summary discussion says Tuesday evening vs action item says Friday)
-        if (taskKey === "task:ui_testing") {
-          const discussionMentionsTuesday =
-            contextText.toLowerCase().includes("tuesday evening") ||
-            contextText.toLowerCase().includes("tuesday");
-          if (
-            discussionMentionsTuesday &&
-            currentDeadline &&
-            currentDeadline.toLowerCase().includes("friday")
-          ) {
-            const conflict: ConflictRecord = {
-              task_id: stableId,
-              field: "deadline",
-              description:
-                "Conflicting deadline for UI improvements: discussion agreed on Tuesday evening, but record has Friday.",
-              evidence: [
-                { source: `${meeting.title} discussion`, value: "Tuesday evening" },
-                { source: `${meeting.title} action item`, value: "Friday" },
-              ],
-            };
-            newTask.conflicts.push(conflict);
-            allConflicts.push(conflict);
-            // Latest confirmed discussion deadline is Tuesday evening
-            newTask.deadline = "Tuesday evening";
-          }
-        }
-
-        taskMap.set(taskKey, newTask);
-      } else {
-        // Existing task updated in a later meeting
-        const existing = taskMap.get(taskKey)!;
-
-        // If previously pending and now confirmed done in this later meeting -> UPDATE STATUS
-        if (existing.status !== "done" && (isDone || confirmsCompletion(contextText, taskKey))) {
-          existing.status = "done";
-          existing.last_confirmed_meeting_id = meeting.id;
-        }
-
-        // If later meeting provides a refined assignee (e.g. Shreyash instead of Remote Participant)
-        if (currentAssignee && currentAssignee !== "Unassigned") {
-          if (existing.assignee === "Remote Participant" && currentAssignee === "Shreyash") {
-            existing.assignee = "Shreyash";
-          } else if (
-            existing.assignee !== currentAssignee &&
-            !existing.assignee?.includes(currentAssignee)
-          ) {
-            // Record assignee conflict if substantially different
-            if (!existing.assignee?.includes("Remote") && !currentAssignee.includes("Remote")) {
-              const conflict: ConflictRecord = {
-                task_id: stableId,
-                field: "assignee",
-                description: `Assignee discrepancy for "${existing.title}": previously "${existing.assignee}", now assigned to "${currentAssignee}".`,
-                evidence: [
-                  { source: `Meeting ${existing.origin_meeting_id}`, value: existing.assignee },
-                  { source: `${meeting.title}`, value: currentAssignee },
-                ],
-              };
-              existing.conflicts.push(conflict);
-              allConflicts.push(conflict);
-            }
-          }
-        }
-
-        // Check deadline changes
-        if (currentDeadline && currentDeadline !== existing.deadline) {
-          // If previous had Friday and this meeting confirms Tuesday evening (or vice versa), record evidence
+        const discussed = deadlineMentionedFor(contextText, a.title, ignoreWords);
+        if (discussed && deadline && !sameDeadline(discussed, deadline, meeting.scheduled_at)) {
           const conflict: ConflictRecord = {
-            task_id: stableId,
+            task_key: key,
             field: "deadline",
-            description: `Deadline change for "${existing.title}": was "${existing.deadline}", updated to "${currentDeadline}".`,
+            description: `Deadline for "${a.title}" differs: the discussion says "${discussed}" but the action item says "${deadline}".`,
             evidence: [
-              { source: `Earlier meeting`, value: existing.deadline },
-              { source: `${meeting.title}`, value: currentDeadline },
+              { source: `${meeting.title} discussion`, value: discussed },
+              { source: `${meeting.title} action item`, value: deadline },
+            ],
+          };
+          task.conflicts.push(conflict);
+          allConflicts.push(conflict);
+        }
+
+        taskMap.set(key, task);
+        continue;
+      }
+
+      // Same task seen again in a later meeting.
+      if (a.id) existing.id = a.id;
+      if (existing.status !== "done" && status !== "pending") {
+        existing.status = status;
+        existing.last_confirmed_meeting_id = meeting.id;
+      }
+
+      if (assignee && assignee !== existing.assignee) {
+        if (isPlaceholderAssignee(existing.assignee)) {
+          existing.assignee = assignee; // a real name replaces a placeholder
+        } else if (!isPlaceholderAssignee(assignee)) {
+          const conflict: ConflictRecord = {
+            task_key: key,
+            field: "assignee",
+            description: `Assignee for "${existing.title}" changed from "${existing.assignee}" to "${assignee}".`,
+            evidence: [
+              { source: "Earlier meeting", value: existing.assignee },
+              { source: meeting.title, value: assignee },
             ],
           };
           existing.conflicts.push(conflict);
           allConflicts.push(conflict);
-          existing.deadline = currentDeadline;
+          existing.assignee = assignee;
         }
-
-        existing.history.push({
-          meeting_id: meeting.id,
-          meeting_title: meeting.title,
-          status: isDone ? "done" : existing.status,
-          deadline: currentDeadline || existing.deadline,
-          assignee: currentAssignee || existing.assignee,
-        });
       }
+
+      if (deadline && !sameDeadline(deadline, existing.deadline, meeting.scheduled_at)) {
+        const conflict: ConflictRecord = {
+          task_key: key,
+          field: "deadline",
+          description: `Deadline for "${existing.title}" changed from "${existing.deadline}" to "${deadline}".`,
+          evidence: [
+            { source: "Earlier meeting", value: existing.deadline },
+            { source: meeting.title, value: deadline },
+          ],
+        };
+        existing.conflicts.push(conflict);
+        allConflicts.push(conflict);
+        existing.deadline = deadline;
+      }
+
+      existing.history.push({
+        meeting_id: meeting.id,
+        meeting_title: meeting.title,
+        status,
+        deadline: deadline || existing.deadline,
+        assignee: assignee || existing.assignee,
+      });
     }
 
-    // 2. Cross-meeting check: If context of this later meeting confirms completion of a previously pending task
-    for (const [key, existing] of taskMap.entries()) {
-      if (existing.status !== "done" && confirmsCompletion(contextText, key)) {
-        existing.status = "done";
-        existing.last_confirmed_meeting_id = meeting.id;
-        existing.history.push({
+    // A later discussion may confirm a task from an earlier meeting.
+    for (const task of taskMap.values()) {
+      if (task.status === "done" || task.origin_meeting_id === meeting.id) continue;
+      if (confirmsCompletion(contextText, task.title, ignoreWords)) {
+        task.status = "done";
+        task.last_confirmed_meeting_id = meeting.id;
+        task.history.push({
           meeting_id: meeting.id,
           meeting_title: meeting.title,
           status: "done",
-          deadline: existing.deadline,
-          assignee: existing.assignee,
+          deadline: task.deadline,
+          assignee: task.assignee,
         });
       }
     }
@@ -527,157 +548,107 @@ export function reconcileCrossMeetingTasks(
 }
 
 /**
- * Builds a strictly grounded, non-hallucinatory cumulative summary from verified meeting data.
+ * Builds a grounded cumulative summary of a series of meetings from the
+ * persisted records only.
  */
 export function buildVerifiedCumulativeSummary(
   project: { id: string; name: string },
-  meetings: Array<{ id: string; title: string; scheduled_at?: string | null }>,
+  meetings: MeetingRef[],
   summaries: Array<{
     meeting_id: string;
-    executive_summary?: string;
-    key_points?: string[];
-    follow_ups?: string[];
+    executive_summary?: string | null;
+    key_points?: unknown;
   }>,
   actions: ActionItemRecord[],
   decisions: DecisionRecord[],
-  transcripts?: Array<{ meeting_id: string; speaker: string; content: string }>,
+  transcripts: Array<{ meeting_id: string; speaker: string; content: string }> = [],
+  ignoreWords: string[] = [],
 ): CumulativeSummaryResult {
-  // Map actions by meeting
   const meetingActions: Record<string, ActionItemRecord[]> = {};
   for (const a of actions) {
-    if (!meetingActions[a.meeting_id]) meetingActions[a.meeting_id] = [];
-    meetingActions[a.meeting_id].push(a);
+    (meetingActions[a.meeting_id] ||= []).push(a);
   }
 
-  // Map contexts by meeting
-  const meetingContexts: Record<
-    string,
-    { summary?: string; transcript?: string; key_points?: string[] }
-  > = {};
+  const meetingContexts: Record<string, MeetingContextText> = {};
   for (const m of meetings) {
     const s = summaries.find((x) => x.meeting_id === m.id);
-    const mTranscripts = (transcripts || []).filter((t) => t.meeting_id === m.id);
-    const transcriptText = mTranscripts.map((t) => `${t.speaker}: ${t.content}`).join("\n");
-
     meetingContexts[m.id] = {
       summary: s?.executive_summary || "",
-      key_points: s?.key_points || [],
-      transcript: transcriptText,
+      key_points: Array.isArray(s?.key_points)
+        ? (s.key_points as unknown[]).filter((k): k is string => typeof k === "string")
+        : [],
+      transcript: transcripts
+        .filter((t) => t.meeting_id === m.id)
+        .map((t) => `${t.speaker}: ${t.content}`)
+        .join("\n"),
     };
   }
 
-  // Run deterministic reconciliation
   const { reconciledTasks, conflicts } = reconcileCrossMeetingTasks(
     meetings,
     meetingActions,
     meetingContexts,
+    ignoreWords,
   );
 
-  // Separate completed vs genuinely pending tasks
   const verifiedCompleted = reconciledTasks.filter((t) => t.status === "done");
   const verifiedPending = reconciledTasks.filter((t) => t.status !== "done");
-
-  // Ensure Friday review commitment is strictly present in pending tasks if not completed
-  const hasFridayReview = reconciledTasks.some((t) => t.canonical_key === "task:joint_review");
-  if (!hasFridayReview && meetings.length > 0) {
-    // If not found in explicit tasks but referenced in summaries/commitments, retain it
-    const fridayTask: ReconciledTask = {
-      id: STABLE_TASK_IDS.joint_review,
-      canonical_key: "task:joint_review",
-      title: "Joint review of all completed deliverables",
-      assignee: "Shreyash & Sumeet Made",
-      deadline: "Friday",
-      status: "pending",
-      origin_meeting_id: meetings[0].id,
-      last_confirmed_meeting_id: meetings[meetings.length - 1].id,
-      is_commitment: true,
-      conflicts: [],
-      history: [],
-    };
-    verifiedPending.push(fridayTask);
-  }
-
-  // Deduplicate strategic decisions
   const verifiedDecisions = deduplicateDecisions(decisions);
 
-  // Generate grounded progress report markdown
-  const reportLines: string[] = [];
-  reportLines.push(`### Cumulative Progress for ${project.name}`);
-  reportLines.push(
-    `Across **${meetings.length} recorded meeting${meetings.length > 1 ? "s" : ""}**, team deliverables and commitments have been tracked and verified against persisted meeting records.`,
+  const lines: string[] = [];
+  lines.push(`### Cumulative progress for ${project.name}`);
+  lines.push(
+    `Based on ${meetings.length} recorded meeting${meetings.length === 1 ? "" : "s"}. Only facts from saved meeting records are included.`,
   );
 
-  // Verified Accomplishments section
-  reportLines.push(`\n#### ✅ Verified Completed Deliverables:`);
+  lines.push(`\n#### Completed`);
   if (verifiedCompleted.length > 0) {
-    for (const task of verifiedCompleted) {
-      reportLines.push(
-        `- **${task.title}**: Completed by **${task.assignee || "Assigned owner"}** (confirmed in meeting records).`,
-      );
+    for (const t of verifiedCompleted) {
+      lines.push(`- **${t.title}**${t.assignee ? ` (${t.assignee})` : ""}`);
     }
   } else {
-    reportLines.push(`- No deliverables confirmed as completed yet.`);
+    lines.push(`- Nothing has been confirmed as completed yet.`);
   }
 
-  // Verified Outstanding Tasks & Commitments section
-  reportLines.push(`\n#### ⏳ Outstanding Deliverables & Commitments:`);
+  lines.push(`\n#### Outstanding`);
   if (verifiedPending.length > 0) {
-    for (const task of verifiedPending) {
-      const deadlineNote = task.deadline ? ` (Deadline: **${task.deadline}**)` : "";
-      const commitmentTag = task.is_commitment ? ` *[Active Review Commitment]*` : "";
-      reportLines.push(
-        `- **${task.title}**${commitmentTag}: Assigned to **${task.assignee || "Unassigned"}**${deadlineNote}.`,
-      );
+    for (const t of verifiedPending) {
+      const due = t.deadline ? `, due ${safeFormatDeadline(t.deadline)}` : "";
+      const state = t.status === "in_progress" ? " (in progress)" : "";
+      lines.push(`- **${t.title}**${state}: ${t.assignee || "Unassigned"}${due}`);
     }
   } else {
-    reportLines.push(`- All deliverables currently completed.`);
+    lines.push(`- No outstanding tasks.`);
   }
 
-  // Strategic Decisions section
   if (verifiedDecisions.length > 0) {
-    reportLines.push(`\n#### 📌 Key Strategic Decisions:`);
+    lines.push(`\n#### Decisions`);
     for (const d of verifiedDecisions) {
-      const owner = d.made_by ? ` *(Agreed by: ${d.made_by})*` : "";
-      reportLines.push(`- ${d.description}${owner}`);
+      lines.push(`- ${d.description}${d.made_by ? ` (${d.made_by})` : ""}`);
     }
   }
 
-  // Flagged Conflicts & Discrepancies section
   if (conflicts.length > 0) {
-    reportLines.push(`\n#### ⚠️ Flagged Record Discrepancies:`);
+    lines.push(`\n#### Discrepancies to check`);
     for (const c of conflicts) {
-      const evidenceStr = c.evidence.map((e) => `\`${e.source}\`: "${e.value}"`).join(" vs ");
-      reportLines.push(`- **${c.description}** — Evidence: ${evidenceStr}`);
+      const evidence = c.evidence.map((e) => `${e.source}: "${e.value ?? "none"}"`).join(" vs ");
+      lines.push(`- ${c.description} (${evidence})`);
     }
   }
 
-  // Build suggested agenda directly from pending commitments and flagged conflicts
-  const suggestedAgenda: string[] = [];
-  for (const pending of verifiedPending) {
-    if (pending.canonical_key === "task:joint_review") {
-      suggestedAgenda.push(
-        `Conduct joint review of completed project dashboard and UI improvements (${pending.deadline || "Friday"})`,
-      );
-    } else {
-      suggestedAgenda.push(
-        `Review progress on ${pending.title} (due ${pending.deadline || "upcoming"})`,
-      );
-    }
-  }
-
-  for (const conflict of conflicts) {
-    suggestedAgenda.push(
-      `Clarify and align on ${conflict.field} discrepancy: ${conflict.description}`,
+  const agenda: string[] = [];
+  for (const t of verifiedPending) {
+    agenda.push(
+      `Review progress on ${t.title}${t.deadline ? ` (due ${safeFormatDeadline(t.deadline)})` : ""}`,
     );
   }
-
-  if (suggestedAgenda.length === 0) {
-    suggestedAgenda.push("Review ongoing progress and plan next milestones");
+  for (const c of conflicts) {
+    agenda.push(`Clarify ${c.field}: ${c.description}`);
   }
 
   return {
-    progress_report: reportLines.join("\n"),
-    suggested_agenda: suggestedAgenda.slice(0, 5),
+    progress_report: lines.join("\n"),
+    suggested_agenda: agenda.slice(0, 5),
     verified_completed: verifiedCompleted,
     verified_pending: verifiedPending,
     verified_decisions: verifiedDecisions,
