@@ -151,7 +151,7 @@ export function ScheduleMeetingDialog({
         const { error } = await supabase.functions.invoke("send-confirmation", {
           body: {
             title: values.title,
-            scheduledAt: scheduledAt.toISOString(),
+            time: scheduledAt.toISOString(),
             platform: values.platform,
             link: values.link || null,
           },
