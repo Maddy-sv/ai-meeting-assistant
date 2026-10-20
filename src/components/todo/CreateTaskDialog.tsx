@@ -20,14 +20,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { TASK_STATUSES, TASK_STATUS_LABEL, type TaskStatus } from "@/components/meeting/status";
+import { TASK_STATUSES, type TaskStatus } from "@/components/meeting/status";
+import { TODO_STATUS_LABEL } from "./labels";
 import type { NewTodoInput, TodoMeeting } from "@/hooks/use-todo-tasks";
 
 export function CreateTaskDialog({
   meetings,
+  defaultAssignee,
   onCreate,
 }: {
   meetings: TodoMeeting[];
+  defaultAssignee: string;
   onCreate: (input: NewTodoInput) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
@@ -84,6 +87,7 @@ export function CreateTaskDialog({
               <Input
                 id="new-task-title"
                 required
+                placeholder="e.g. Complete presentation slides"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
               />
@@ -93,8 +97,15 @@ export function CreateTaskDialog({
               <Input
                 id="new-task-assignee"
                 value={assignee}
+                placeholder={defaultAssignee || undefined}
+                aria-describedby={defaultAssignee ? "new-task-assignee-hint" : undefined}
                 onChange={(e) => setAssignee(e.target.value)}
               />
+              {defaultAssignee && (
+                <p id="new-task-assignee-hint" className="text-xs text-muted-foreground">
+                  Leave blank to assign it to yourself ({defaultAssignee}).
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="new-task-meeting">Meeting</Label>
@@ -130,7 +141,7 @@ export function CreateTaskDialog({
                   <SelectContent>
                     {TASK_STATUSES.map((s) => (
                       <SelectItem key={s} value={s}>
-                        {TASK_STATUS_LABEL[s]}
+                        {TODO_STATUS_LABEL[s]}
                       </SelectItem>
                     ))}
                   </SelectContent>

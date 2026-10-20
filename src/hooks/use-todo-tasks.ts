@@ -7,12 +7,9 @@ import {
   deleteActionItemServer,
   updateActionItemStatus,
 } from "@/lib/ai.functions";
-import {
-  normalizeTaskStatus,
-  type TaskStatus,
-  TASK_STATUS_LABEL,
-} from "@/components/meeting/status";
+import { normalizeTaskStatus, type TaskStatus } from "@/components/meeting/status";
 import { errorMessage } from "@/components/meeting/utils";
+import { TODO_STATUS_LABEL } from "@/components/todo/labels";
 
 export type TodoTask = {
   id: string;
@@ -58,6 +55,7 @@ function extractRow(res: unknown): RawTask | null {
 export function useTodoTasks() {
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState("");
+  const [profileName, setProfileName] = useState("");
   const [tasks, setTasks] = useState<TodoTask[]>([]);
   const [meetings, setMeetings] = useState<TodoMeeting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,6 +87,7 @@ export function useTodoTasks() {
           .order("created_at", { ascending: false }),
       ]);
       if (mErr) throw new Error(mErr.message);
+      setProfileName(prof?.full_name?.trim() || "");
       setUserName(prof?.full_name?.trim() || auth.user.email?.split("@")[0] || "");
       const meetingList = (mData ?? []) as TodoMeeting[];
       setMeetings(meetingList);
@@ -171,7 +170,7 @@ export function useTodoTasks() {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)));
     try {
       await updateFn({ data: { actionId: taskId, status } });
-      toast.success(`Moved to ${TASK_STATUS_LABEL[status]}.`);
+      toast.success(`Moved to ${TODO_STATUS_LABEL[status]}.`);
     } catch (err) {
       setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: previous } : t)));
       toast.error(errorMessage(err, "Could not update the task."));
@@ -195,7 +194,7 @@ export function useTodoTasks() {
       const res = await createFn({
         data: {
           title: input.title.trim(),
-          assignee: input.assignee.trim() || null,
+          assignee: input.assignee.trim() || profileName || null,
           meetingId: input.meetingId,
           deadline: input.deadline || null,
           status: input.status,
@@ -218,6 +217,7 @@ export function useTodoTasks() {
   return {
     userId,
     userName,
+    profileName,
     tasks,
     meetings,
     meetingsById,

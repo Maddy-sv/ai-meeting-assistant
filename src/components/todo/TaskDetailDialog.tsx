@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRight, CalendarDays, Loader2, Sparkles, Trash2, UserRound } from "lucide-react";
+import {
+  ArrowUpRight,
+  CalendarDays,
+  Loader2,
+  Mail,
+  Sparkles,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,14 +19,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
-import {
-  TASK_STATUSES,
-  TASK_STATUS_LABEL,
-  taskStatusClass,
-  type TaskStatus,
-} from "@/components/meeting/status";
-import { formatDeadline, toStringList } from "@/components/meeting/utils";
+import { TASK_STATUSES, taskStatusClass, type TaskStatus } from "@/components/meeting/status";
+import { toStringList } from "@/components/meeting/utils";
 import type { TodoMeeting, TodoTask } from "@/hooks/use-todo-tasks";
+import { formatDeadlineFrom } from "@/lib/format";
+import { TODO_STATUS_LABEL, taskReferenceDate } from "./labels";
 
 type MeetingSummary = { executive_summary: string | null; key_points: unknown };
 
@@ -110,7 +115,7 @@ export function TaskDetailDialog({
           <div className="space-y-5">
             <DialogHeader>
               <Badge className={`w-fit border-transparent ${taskStatusClass(task.status)}`}>
-                {TASK_STATUS_LABEL[task.status]}
+                {TODO_STATUS_LABEL[task.status]}
               </Badge>
               <DialogTitle className="text-xl leading-snug">{task.title}</DialogTitle>
               <DialogDescription className="sr-only">Task details</DialogDescription>
@@ -126,7 +131,7 @@ export function TaskDetailDialog({
                   aria-pressed={s === task.status}
                   onClick={() => onMove(task.id, s)}
                 >
-                  {TASK_STATUS_LABEL[s]}
+                  {TODO_STATUS_LABEL[s]}
                 </Button>
               ))}
             </div>
@@ -146,7 +151,9 @@ export function TaskDetailDialog({
                 <div>
                   <dt className="text-xs uppercase tracking-widest text-muted-foreground">Due</dt>
                   <dd className="text-sm font-semibold">
-                    {task.deadline ? formatDeadline(task.deadline) : "No due date"}
+                    {task.deadline
+                      ? formatDeadlineFrom(task.deadline, taskReferenceDate(task, meeting))
+                      : "No due date"}
                   </dd>
                 </div>
               </div>
@@ -172,9 +179,22 @@ export function TaskDetailDialog({
               >
                 <Trash2 className="h-4 w-4" /> Delete task
               </Button>
-              <Button variant="outline" size="sm" className="rounded-full" onClick={onClose}>
-                Close
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {task.meeting_id && meeting && (
+                  <Button
+                    asChild
+                    size="sm"
+                    className="gradient-bg rounded-full text-primary-foreground shadow-glow"
+                  >
+                    <Link to="/meetings/$id" params={{ id: task.meeting_id }}>
+                      <Mail className="h-4 w-4" aria-hidden /> Open Meeting & Share Recap
+                    </Link>
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" className="rounded-full" onClick={onClose}>
+                  Close
+                </Button>
+              </div>
             </div>
           </div>
         )}
