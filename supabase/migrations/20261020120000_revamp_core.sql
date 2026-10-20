@@ -106,6 +106,9 @@ CREATE POLICY "admins read all summaries" ON public.ai_summaries
   USING (public.is_admin());
 
 -- action_items (host policy; assignee policies are added in section 5)
+-- Remove a hand-added catch-all policy found on the live project: it matched assignees with
+-- ILIKE '%name%' and called has_role, so it would both leak tasks and break once has_role is revoked.
+DROP POLICY IF EXISTS "action_items_master_policy" ON public.action_items;
 DROP POLICY IF EXISTS "actions via meeting" ON public.action_items;
 CREATE POLICY "actions via meeting" ON public.action_items
   FOR ALL TO authenticated
