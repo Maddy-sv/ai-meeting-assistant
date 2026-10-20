@@ -33,7 +33,7 @@ import { NotificationsBell } from "@/components/layout/notifications-bell";
 import { useDisplayName, useIsAdmin, useUser } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
-export const BRAND_NAME = "AI Meeting Companion";
+export const BRAND_NAME = "AI Powered Meeting Companion";
 
 interface NavItem {
   to: LinkProps["to"] & string;
@@ -45,13 +45,13 @@ interface NavItem {
 
 const USER_NAV: NavItem[] = [
   { to: "/user/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { to: "/meetings", label: "Meetings", icon: Video },
-  { to: "/calendar", label: "Calendar", icon: CalendarDays },
-  { to: "/todo", label: "Tasks", icon: ListTodo },
   { to: "/projects", label: "Projects", icon: FolderKanban },
-  { to: "/chat", label: "Chat", icon: MessageSquare },
+  { to: "/meetings", label: "My Meetings", icon: Video },
+  { to: "/todo", label: "Tasks", icon: ListTodo },
+  { to: "/calendar", label: "Calendar", icon: CalendarDays },
+  { to: "/chat", label: "AI Chat Bot", icon: MessageSquare },
   { to: "/search", label: "Search", icon: Search },
-  { to: "/profile", label: "Profile", icon: User },
+  { to: "/profile", label: "Profile & Settings", icon: User },
 ];
 
 const ADMIN_NAV: NavItem[] = [
@@ -82,11 +82,19 @@ async function signOut(router: ReturnType<typeof useRouter>) {
 
 function Brand({ onNavigate }: { onNavigate?: () => void }) {
   return (
-    <Link to="/user/dashboard" onClick={onNavigate} className="flex items-center gap-2 px-2">
+    <Link
+      to="/user/dashboard"
+      onClick={onNavigate}
+      aria-label={`${BRAND_NAME} home`}
+      className="flex items-center gap-2 px-2"
+    >
       <div className="gradient-bg grid h-9 w-9 shrink-0 place-items-center rounded-xl shadow-glow">
         <Sparkles className="h-5 w-5 text-primary-foreground" />
       </div>
-      <span className="text-base font-bold leading-tight tracking-tight">{BRAND_NAME}</span>
+      <div className="min-w-0">
+        <div className="text-lg font-bold leading-tight tracking-tight">AI Companion</div>
+        <div className="text-xs uppercase tracking-widest text-muted-foreground">Workspace</div>
+      </div>
     </Link>
   );
 }
@@ -137,6 +145,7 @@ function SidebarContent({
   isAdmin: boolean;
   onNavigate?: () => void;
 }) {
+  const router = useRouter();
   const user = useUser();
   const name = useDisplayName();
   return (
@@ -156,9 +165,19 @@ function SidebarContent({
           </div>
         )}
       </nav>
-      <div className="glass rounded-2xl p-3">
-        <div className="truncate text-sm font-medium">{name || "You"}</div>
-        <div className="truncate text-xs text-muted-foreground">{user?.email}</div>
+      <div className="space-y-2 border-t pt-4">
+        <div className="glass rounded-2xl p-3">
+          <div className="truncate text-sm font-medium">{name || "You"}</div>
+          <div className="truncate text-xs text-muted-foreground">{user?.email}</div>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start gap-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          onClick={() => void signOut(router)}
+        >
+          <LogOut className="h-4 w-4" /> Sign out
+        </Button>
       </div>
     </div>
   );
