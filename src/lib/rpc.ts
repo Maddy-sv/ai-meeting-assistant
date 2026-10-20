@@ -1,29 +1,11 @@
 /**
- * Typed wrappers around the Postgres RPCs and columns added by the revamp
- * migration (`supabase/migrations/20261020120000_revamp_core.sql`).
- *
- * TEMPORARY CASTS: until the regenerated `types.ts` is merged, the generated
- * `Database` type does not know these functions/columns, so `untypedRpc` and the
- * `*Row` types below bridge the gap. After the merge, `untypedRpc(...)` calls
- * can become `supabase.rpc(...)` and the row types can use `Tables<...>`.
- * This is the only file that contains such casts.
+ * Typed wrappers around the Postgres RPCs and the tables the pages share
+ * (projects, meetings, chat history). Every helper throws a user-friendly
+ * Error on failure, so callers can show `toast.error(err.message)`.
  */
+import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
-
-type RpcResult = { data: unknown; error: { message: string; code?: string } | null };
-type UntypedRpcClient = {
-  rpc: (fn: string, args?: Record<string, unknown>) => PromiseLike<RpcResult>;
-};
-
-async function untypedRpc<T>(fn: string, args?: Record<string, unknown>): Promise<T> {
-  const { data, error } = await (supabase as unknown as UntypedRpcClient).rpc(fn, args);
-  if (error) {
-    console.error(`[rpc] ${fn} failed`, error);
-    throw new Error(friendlyRpcError(error));
-  }
-  return data as T;
-}
 
 function friendlyRpcError(error: { message: string; code?: string }): string {
   // P0001 = RAISE EXCEPTION in our own SQL functions; those messages are written for users
@@ -33,22 +15,25 @@ function friendlyRpcError(error: { message: string; code?: string }): string {
   return "Something went wrong. Please try again.";
 }
 
+/** Returns an RPC's data, or throws a user-friendly error. */
+function rpcData<T>(fn: string, res: { data: T; error: PostgrestError | null }): T {
+  if (res.error) {
+    console.error(`[rpc] ${fn} failed`, res.error);
+    throw new Error(friendlyRpcError(res.error));
+  }
+  return res.data;
+}
+
 /* ------------------------------------------------------------------ rows */
 
-/** `profiles` row including the revamp columns `is_active` and `email`. */
-export type ProfileRow = Tables<"profiles"> & {
-  is_active?: boolean;
-  email?: string | null;
-};
-
-/** `notifications` row including the revamp column `link`. */
-export type NotificationRow = Tables<"notifications"> & { link?: string | null };
+export type ProfileRow = Tables<"profiles">;
+export type NotificationRow = Tables<"notifications">;
 
 /* ------------------------------------------------------------------ RPCs */
 
 /** True when the signed-in user has the admin role (`public.is_admin()`). */
-export function isAdmin(): Promise<boolean> {
-  return untypedRpc<boolean>("is_admin").then(Boolean);
+export async function isAdmin(): Promise<boolean> {
+  return Boolean(rpcData("is_admin", await supabase.rpc("is_admin")));
 }
 
 export interface AdminOverview {
@@ -63,8 +48,12 @@ export interface AdminOverview {
   ai_requests_today: number;
   ai_failures_today: number;
 }
-export function adminOverview(): Promise<AdminOverview> {
-  return untypedRpc<AdminOverview>("admin_overview");
+export async function adminOverview(): Promise<AdminOverview> {
+  // The function returns json; its shape is fixed by the SQL above.
+  return rpcData(
+    "admin_overview",
+    await supabase.rpc("admin_overview"),
+  ) as unknown as AdminOverview;
 }
 
 export interface AdminUser {
@@ -77,8 +66,8 @@ export interface AdminUser {
   last_sign_in_at: string | null;
   meeting_count: number;
 }
-export function adminListUsers(): Promise<AdminUser[]> {
-  return untypedRpc<AdminUser[] | null>("admin_list_users").then((r) => r ?? []);
+export async function adminListUsers(): Promise<AdminUser[]> {
+  return rpcData("admin_list_users", await supabase.rpc("admin_list_users")) ?? [];
 }
 
 export interface AdminMeeting {
@@ -92,16 +81,19 @@ export interface AdminMeeting {
   transcript_count: number;
   has_summary: boolean;
 }
-export function adminListMeetings(): Promise<AdminMeeting[]> {
-  return untypedRpc<AdminMeeting[] | null>("admin_list_meetings").then((r) => r ?? []);
+export async function adminListMeetings(): Promise<AdminMeeting[]> {
+  return rpcData("admin_list_meetings", await supabase.rpc("admin_list_meetings")) ?? [];
 }
 
-export function adminSetUserRole(target: string, makeAdmin: boolean): Promise<void> {
-  return untypedRpc<void>("admin_set_user_role", { target, make_admin: makeAdmin });
+export async function adminSetUserRole(target: string, makeAdmin: boolean): Promise<void> {
+  rpcData(
+    "admin_set_user_role",
+    await supabase.rpc("admin_set_user_role", { target, make_admin: makeAdmin }),
+  );
 }
 
-export function adminSetUserActive(target: string, active: boolean): Promise<void> {
-  return untypedRpc<void>("admin_set_user_active", { target, active });
+export async function adminSetUserActive(target: string, active: boolean): Promise<void> {
+  rpcData("admin_set_user_active", await supabase.rpc("admin_set_user_active", { target, active }));
 }
 
 export interface AdminAiUsage {
@@ -112,8 +104,8 @@ export interface AdminAiUsage {
   by_function: { fn: string; count: number; failures: number }[];
   daily: { day: string; count: number }[];
 }
-export function adminAiUsage(): Promise<AdminAiUsage> {
-  return untypedRpc<AdminAiUsage>("admin_ai_usage");
+export async function adminAiUsage(): Promise<AdminAiUsage> {
+  return rpcData("admin_ai_usage", await supabase.rpc("admin_ai_usage")) as unknown as AdminAiUsage;
 }
 
 export interface SeedDemoResult {
@@ -123,8 +115,9 @@ export interface SeedDemoResult {
   created: boolean;
 }
 /** Inserts the sample research-scenario workspace for the calling user only. */
-export function seedDemoWorkspace(): Promise<SeedDemoResult> {
-  return untypedRpc<SeedDemoResult>("seed_demo_workspace");
+export async function seedDemoWorkspace(): Promise<SeedDemoResult> {
+  const res = await supabase.rpc("seed_demo_workspace");
+  return rpcData("seed_demo_workspace", res) as unknown as SeedDemoResult;
 }
 
 /* --------------------------------------------------------------- search */
@@ -140,61 +133,45 @@ export interface SearchResult {
 }
 
 /** Searches the caller's meetings, transcripts, summaries, tasks and decisions (RLS applies). */
-export function searchWorkspace(q: string): Promise<SearchResult[]> {
-  return untypedRpc<SearchResult[] | null>("search_workspace", { q }).then((r) => r ?? []);
+export async function searchWorkspace(q: string): Promise<SearchResult[]> {
+  const rows = rpcData("search_workspace", await supabase.rpc("search_workspace", { q })) ?? [];
+  // `kind` is one of the five literals produced by the SQL function.
+  return rows.map((r) => ({ ...r, kind: r.kind as SearchResultKind }));
 }
 
-/* ------------------------------------------------------ untyped tables */
-/*
- * The generated `Database` type does not yet describe `projects`, `meetings.project_id`
- * or `chat_messages`. These helpers query them through an untyped client and return
- * explicit row types, so pages stay fully typed. After `types.ts` is regenerated they can
- * switch to the typed `supabase` client without changing their signatures.
- */
+/* --------------------------------------------------------------- tables */
 
-type DbError = { message: string; code?: string };
-type DbResult = { data: unknown; error: DbError | null };
-/** Minimal structural view of the PostgREST query builder used below. */
-interface UntypedQuery extends PromiseLike<DbResult> {
-  select(columns?: string): UntypedQuery;
-  insert(values: Record<string, unknown> | Record<string, unknown>[]): UntypedQuery;
-  update(values: Record<string, unknown>): UntypedQuery;
-  delete(): UntypedQuery;
-  eq(column: string, value: unknown): UntypedQuery;
-  in(column: string, values: unknown[]): UntypedQuery;
-  order(column: string, options?: { ascending?: boolean; nullsFirst?: boolean }): UntypedQuery;
-  single(): UntypedQuery;
-  maybeSingle(): UntypedQuery;
-}
-type UntypedTableClient = { from: (table: string) => UntypedQuery };
-
-function untypedFrom(table: string): UntypedQuery {
-  return (supabase as unknown as UntypedTableClient).from(table);
-}
-
-async function runQuery<T>(query: PromiseLike<DbResult>, failure: string): Promise<T> {
+async function runQuery<T>(
+  query: PromiseLike<{ data: T; error: PostgrestError | null }>,
+  failure: string,
+): Promise<T> {
   const { data, error } = await query;
   if (error) {
     console.error(`[db] ${failure}`, error);
     throw new Error(error.code === "42501" ? "You don't have permission to do that." : failure);
   }
-  return data as T;
+  return data;
 }
 
-export interface ProjectRow {
-  id: string;
-  name: string;
-  description: string | null;
-  owner_id: string;
-  created_at: string;
+/** Row-level security skips rows the caller may not change; report that instead of succeeding. */
+function requireChanged(rows: { id: string }[] | null): void {
+  if (!rows || rows.length === 0) {
+    throw new Error("Not found, or you don't have permission to change it.");
+  }
 }
+
+export type ProjectRow = Pick<
+  Tables<"projects">,
+  "id" | "name" | "description" | "owner_id" | "created_at"
+>;
 
 const PROJECT_COLUMNS = "id, name, description, owner_id, created_at";
 
 /** The user's projects, newest first. */
 export function listProjects(ownerId: string): Promise<ProjectRow[]> {
-  return runQuery<ProjectRow[] | null>(
-    untypedFrom("projects")
+  return runQuery(
+    supabase
+      .from("projects")
       .select(PROJECT_COLUMNS)
       .eq("owner_id", ownerId)
       .order("created_at", { ascending: false }),
@@ -204,8 +181,8 @@ export function listProjects(ownerId: string): Promise<ProjectRow[]> {
 
 /** One project, or null when it does not exist or is not visible to the caller. */
 export function getProject(id: string): Promise<ProjectRow | null> {
-  return runQuery<ProjectRow | null>(
-    untypedFrom("projects").select(PROJECT_COLUMNS).eq("id", id).maybeSingle(),
+  return runQuery(
+    supabase.from("projects").select(PROJECT_COLUMNS).eq("id", id).maybeSingle(),
     "Could not load this project.",
   );
 }
@@ -215,57 +192,65 @@ export function createProject(input: {
   name: string;
   description: string | null;
 }): Promise<ProjectRow> {
-  return runQuery<ProjectRow>(
-    untypedFrom("projects")
+  return runQuery(
+    supabase
+      .from("projects")
       .insert({ owner_id: input.ownerId, name: input.name, description: input.description })
       .select(PROJECT_COLUMNS)
       .single(),
     "Could not create the project.",
-  );
+  ).then((row) => {
+    if (!row) throw new Error("Could not create the project.");
+    return row;
+  });
 }
 
 export function updateProject(
   id: string,
   input: { name: string; description: string | null },
 ): Promise<void> {
-  return runQuery<void>(
-    untypedFrom("projects")
+  return runQuery(
+    supabase
+      .from("projects")
       .update({ name: input.name, description: input.description })
-      .eq("id", id),
+      .eq("id", id)
+      .select("id"),
     "Could not save the project.",
-  );
+  ).then(requireChanged);
 }
 
 /** Deletes a project. Its meetings are kept (`meetings.project_id` becomes null). */
 export function deleteProject(id: string): Promise<void> {
-  return runQuery<void>(
-    untypedFrom("projects").delete().eq("id", id),
+  return runQuery(
+    supabase.from("projects").delete().eq("id", id).select("id"),
     "Could not delete the project.",
-  );
+  ).then(requireChanged);
 }
 
 /** Meeting columns used by the list, calendar and project pages (includes `project_id`). */
-export interface MeetingListRow {
-  id: string;
-  title: string;
-  platform: string;
-  status: string;
-  scheduled_at: string | null;
-  started_at: string | null;
-  created_at: string;
-  duration_seconds: number | null;
-  meeting_link: string | null;
-  project_id: string | null;
-  google_event_id: string | null;
-}
+export type MeetingListRow = Pick<
+  Tables<"meetings">,
+  | "id"
+  | "title"
+  | "platform"
+  | "status"
+  | "scheduled_at"
+  | "started_at"
+  | "created_at"
+  | "duration_seconds"
+  | "meeting_link"
+  | "project_id"
+  | "google_event_id"
+>;
 
 const MEETING_LIST_COLUMNS =
   "id, title, platform, status, scheduled_at, started_at, created_at, duration_seconds, meeting_link, project_id, google_event_id";
 
 /** Meetings hosted by the user, newest first. */
 export function listMyMeetings(hostId: string): Promise<MeetingListRow[]> {
-  return runQuery<MeetingListRow[] | null>(
-    untypedFrom("meetings")
+  return runQuery(
+    supabase
+      .from("meetings")
       .select(MEETING_LIST_COLUMNS)
       .eq("host_id", hostId)
       .order("created_at", { ascending: false }),
@@ -275,8 +260,9 @@ export function listMyMeetings(hostId: string): Promise<MeetingListRow[]> {
 
 /** Meetings linked to a project, latest scheduled first. */
 export function listProjectMeetings(projectId: string): Promise<MeetingListRow[]> {
-  return runQuery<MeetingListRow[] | null>(
-    untypedFrom("meetings")
+  return runQuery(
+    supabase
+      .from("meetings")
       .select(MEETING_LIST_COLUMNS)
       .eq("project_id", projectId)
       .order("scheduled_at", { ascending: false, nullsFirst: false }),
@@ -296,8 +282,9 @@ export interface NewMeeting {
 
 /** Inserts upcoming meetings for the user and returns the created rows. */
 export function createMeetings(meetings: NewMeeting[]): Promise<MeetingListRow[]> {
-  return runQuery<MeetingListRow[] | null>(
-    untypedFrom("meetings")
+  return runQuery(
+    supabase
+      .from("meetings")
       .insert(
         meetings.map((m) => ({
           host_id: m.hostId,
@@ -324,21 +311,24 @@ export interface ChatMessageRow {
 
 /** The user's chat history, oldest first. */
 export function listChatMessages(userId: string): Promise<ChatMessageRow[]> {
-  return runQuery<ChatMessageRow[] | null>(
-    untypedFrom("chat_messages")
+  return runQuery(
+    supabase
+      .from("chat_messages")
       .select("id, role, content, created_at")
       .eq("user_id", userId)
       .order("created_at", { ascending: true }),
     "Could not load your chat history.",
-  ).then((r) => r ?? []);
+  ).then((rows) =>
+    (rows ?? []).map((m) => ({ ...m, role: m.role === "assistant" ? "assistant" : "user" })),
+  );
 }
 
 /** Deletes all of the user's chat messages. */
 export function clearChatMessages(userId: string): Promise<void> {
-  return runQuery<void>(
-    untypedFrom("chat_messages").delete().eq("user_id", userId),
+  return runQuery(
+    supabase.from("chat_messages").delete().eq("user_id", userId),
     "Could not clear your chat history.",
-  );
+  ).then(() => undefined);
 }
 
 /* ----------------------------------------------------------- query keys */
@@ -355,16 +345,13 @@ export const dataKeys = {
 
 /* ----------------------------------------------------------------- chat */
 
-type AskChatBotFn = (opts: { data: { message: string } }) => Promise<{ reply: string }>;
-
 /**
  * Sends one chat message; the server loads the history, answers and saves both messages.
  * The server function is imported lazily so it is not part of the app-shell bundle.
- * TEMPORARY CAST: `askChatBot` changes to `{ message } -> { reply }` in the backend revamp.
  */
 export async function askChat(message: string): Promise<string> {
   const { askChatBot } = await import("@/lib/ai.functions");
-  const result = await (askChatBot as unknown as AskChatBotFn)({ data: { message } });
+  const result = await askChatBot({ data: { message } });
   if (!result?.reply) throw new Error("The assistant did not reply. Please try again.");
   return result.reply;
 }

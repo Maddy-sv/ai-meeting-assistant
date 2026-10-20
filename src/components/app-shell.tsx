@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Link, useRouter, useRouterState } from "@tanstack/react-router";
+import { Link, useRouter, useRouterState, type LinkProps } from "@tanstack/react-router";
 import {
   Bot,
   CalendarDays,
@@ -37,8 +37,8 @@ import { cn } from "@/lib/utils";
 export const BRAND_NAME = "AI Meeting Companion";
 
 interface NavItem {
-  /** Plain path so routes added later (e.g. /search) can be listed before they exist. */
-  to: string;
+  /** A registered route path, so links are checked by the router types. */
+  to: LinkProps["to"] & string;
   label: string;
   icon: LucideIcon;
   /** Only highlight on an exact path match. */
@@ -112,8 +112,7 @@ function NavList({
         return (
           <li key={item.to}>
             <Link
-              // Cast: NavItem.to is a plain string (see NavItem).
-              to={item.to as never}
+              to={item.to}
               onClick={onNavigate}
               aria-current={active ? "page" : undefined}
               className={cn(
