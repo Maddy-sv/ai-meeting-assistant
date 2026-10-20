@@ -1,102 +1,112 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { GoogleGenAI, Type } from "@google/genai";
+import { buildVerifiedCumulativeSummary, resolveDeadlineToISODate } from "./continuous-memory";
+import { parseJson } from "@/server/ai/gemini";
+import { generateForUser } from "@/server/ai/usage";
 import {
-  STABLE_TASK_IDS,
-  getStableTaskId,
-  deduplicateDecisions,
-  buildVerifiedCumulativeSummary,
-  confirmsCompletion,
-  resolveDeadlineToISODate,
-} from "./continuous-memory";
+  CLEAN_SCHEMA,
+  CLEAN_SYSTEM,
+  EXTRACTION_SCHEMA,
+  EXTRACTION_SYSTEM,
+  PROJECT_SCHEMA,
+  PROJECT_SYSTEM,
+  SUMMARY_SCHEMA,
+  SUMMARY_SYSTEM,
+  TRANSCRIBE_SCHEMA,
+  chatSystem,
+  cleanPrompt,
+  extractionPrompt,
+  projectPrompt,
+  summaryPrompt,
+  transcribeSystem,
+  transcriptText,
+} from "@/server/ai/prompts";
+import {
+  MAX_AUDIO_BYTES,
+  MAX_SCREENSHOTS,
+  MAX_SCREENSHOT_BYTES,
+  base64Field,
+  parseInput,
+  splitBase64,
+  uuid,
+} from "@/server/validation";
+import {
+  fail,
+  getHostName,
+  getParticipantNames,
+  replaceDecisions,
+  requireOwnedMeeting,
+  saveExtractedActionItems,
+  type ActionItemRow,
+  type DecisionRow,
+} from "@/server/meetings";
 
-const AVAILABLE_MODELS = [
-  "gemini-3.7-flash",
-  "gemini-3.8-flash",
-  "gemini-3.5-flash",
-  "gemini-3.5-flash-lite",
-];
+// ---------------------------------------------------------------------------
+// Shared schemas for AI output
+// ---------------------------------------------------------------------------
 
-async function generateWithRetry(ai: any, params: any, maxRetries = 3) {
-  const modelsToTry = params.model
-    ? [params.model, ...AVAILABLE_MODELS.filter((m) => m !== params.model)]
-    : AVAILABLE_MODELS;
+const str = (max: number) => z.string().trim().max(max);
+const nullableStr = (max: number) =>
+  z
+    .string()
+    .nullish()
+    .transform((v) => (v && v.trim() ? v.trim().slice(0, max) : null));
 
-  let lastErr: any = null;
+const aiActionItem = z.object({
+  title: z.string().transform((s) => s.trim().slice(0, 500)),
+  assignee: nullableStr(200),
+  deadline: nullableStr(100),
+  status: z.string().nullish(),
+});
+const aiDecision = z.object({
+  description: z.string().transform((s) => s.trim().slice(0, 1000)),
+  made_by: nullableStr(200),
+});
+const strList = (n: number) =>
+  z
+    .array(z.string())
+    .nullish()
+    .transform((a) =>
+      (a ?? [])
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, n),
+    );
 
-  for (const model of modelsToTry) {
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        return await ai.models.generateContent({ ...params, model });
-      } catch (err: any) {
-        lastErr = err;
-        const msg = err?.message || String(err) || "";
+const aiSummary = z.object({
+  executive_summary: z.string().transform((s) => s.trim()),
+  key_points: strList(6),
+  risks: strList(4),
+  follow_ups: strList(5),
+  action_items: z
+    .array(aiActionItem)
+    .nullish()
+    .transform((a) => a ?? []),
+  decisions: z
+    .array(aiDecision)
+    .nullish()
+    .transform((a) => a ?? []),
+});
 
-        const isAuthError =
-          msg.includes("401") ||
-          msg.includes("UNAUTHENTICATED") ||
-          msg.includes("invalid authentication credentials") ||
-          msg.includes("ACCESS_TOKEN_TYPE_UNSUPPORTED") ||
-          msg.includes("API key not valid");
+const aiExtraction = z.object({
+  action_items: z
+    .array(aiActionItem)
+    .nullish()
+    .transform((a) => a ?? []),
+  decisions: z
+    .array(aiDecision)
+    .nullish()
+    .transform((a) => a ?? []),
+});
 
-        if (isAuthError) {
-          throw new Error(
-            "Invalid Gemini API Key: Please check GEMINI_API_KEY in your .env file. It must be a valid API key starting with 'AIzaSy...' from Google AI Studio (https://aistudio.google.com/app/apikey).",
-          );
-        }
-
-        const isRateOrDemandError =
-          msg.includes("503") ||
-          msg.includes("429") ||
-          msg.includes("RESOURCE_EXHAUSTED") ||
-          msg.includes("UNAVAILABLE") ||
-          msg.includes("quota") ||
-          msg.includes("Quota") ||
-          msg.includes("exceeded") ||
-          msg.includes("rate-limit") ||
-          msg.includes("rate_limit") ||
-          msg.includes("overloaded") ||
-          msg.includes("Please retry in") ||
-          msg.includes("high demand");
-
-        if (isRateOrDemandError) {
-          // If this model hit a daily quota (429 RESOURCE_EXHAUSTED), switch to next available candidate model immediately
-          if (
-            msg.includes("RESOURCE_EXHAUSTED") ||
-            msg.includes("quota") ||
-            msg.includes("Quota") ||
-            msg.includes("429")
-          ) {
-            console.warn(`Model ${model} hit quota limit. Failing over to next model...`);
-            break;
-          }
-
-          if (i < maxRetries - 1) {
-            let delayMs = (i + 1) * 1500;
-            const msMatch = msg.match(/retry in ([0-9.]+)ms/i);
-            const sMatch = msg.match(/retry in ([0-9.]+)s/i);
-            if (msMatch && msMatch[1]) {
-              const parsed = parseFloat(msMatch[1]);
-              if (!isNaN(parsed) && parsed > 0) delayMs = Math.max(delayMs, parsed + 400);
-            } else if (sMatch && sMatch[1]) {
-              const parsed = parseFloat(sMatch[1]);
-              if (!isNaN(parsed) && parsed > 0) delayMs = Math.max(delayMs, parsed * 1000 + 400);
-            }
-
-            console.warn(
-              `Gemini API rate limit on ${model}. Retrying in ${(delayMs / 1000).toFixed(1)}s (attempt ${i + 1}/${maxRetries})...`,
-            );
-            await new Promise((r) => setTimeout(r, delayMs));
-          }
-        } else {
-          // Non-rate error (e.g. 404 model not found) -> try next model
-          break;
-        }
-      }
-    }
+function parseAi<S extends z.ZodTypeAny>(schema: S, text: string): z.output<S> {
+  const result = schema.safeParse(parseJson(text));
+  if (!result.success) {
+    console.warn("[ai] response did not match schema:", result.error.issues[0]);
+    throw new Error("The AI returned an unexpected response. Please try again.");
   }
-
-  throw lastErr || new Error("All AI models are currently busy or unavailable.");
+  return result.data;
 }
 
 type SummaryPayload = {
@@ -108,1270 +118,822 @@ type SummaryPayload = {
   decisions: { description: string; made_by: string | null }[];
 };
 
+// ---------------------------------------------------------------------------
+// summarizeMeeting
+// ---------------------------------------------------------------------------
+
+const SummarizeInput = z.object({
+  meetingId: uuid,
+  screenshots: z
+    .array(base64Field(MAX_SCREENSHOT_BYTES, "Screenshot"))
+    .max(MAX_SCREENSHOTS, `At most ${MAX_SCREENSHOTS} screenshots can be attached`)
+    .optional(),
+});
+
 export const summarizeMeeting = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: { meetingId: string; screenshots?: string[] }) => {
-    if (!input?.meetingId || typeof input.meetingId !== "string") {
-      throw new Error("meetingId is required");
-    }
-    return input;
-  })
-  .handler(async ({ data, context }) => {
+  .inputValidator((input: z.input<typeof SummarizeInput>) => parseInput(SummarizeInput, input))
+  .handler(async ({ data, context }): Promise<SummaryPayload> => {
     const { supabase, userId } = context;
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) throw new Error("Missing GEMINI_API_KEY");
+    const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
 
-    const { data: meeting, error: mErr } = await supabase
-      .from("meetings")
-      .select("id, title, host_id, scheduled_at, created_at")
-      .eq("id", data.meetingId)
-      .maybeSingle();
-    if (mErr) throw mErr;
-    if (!meeting || meeting.host_id !== userId) throw new Error("Meeting not found");
-
-    const { data: segs } = await supabase
+    const { data: segs, error: segErr } = await supabase
       .from("transcripts")
-      .select("speaker, content, spoken_at, segment_index")
-      .eq("meeting_id", data.meetingId)
+      .select("speaker, content")
+      .eq("meeting_id", meeting.id)
       .order("segment_index", { ascending: true });
+    if (segErr) fail("load transcript", segErr, "Could not load the transcript.");
 
-    const transcript = (segs ?? []).map((s: any) => `${s.speaker}: ${s.content}`).join("\n");
-
+    const transcript = transcriptText(segs);
     if (!transcript.trim()) {
-      return {
-        executive_summary: "No speech was captured during this meeting.",
-        key_points: [],
-        risks: [],
-        follow_ups: [],
-        action_items: [],
-        decisions: [],
-      } satisfies SummaryPayload;
+      throw new Error("This meeting has no transcript yet, so there is nothing to summarise.");
     }
 
-    const { data: hostProf } = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", userId)
-      .maybeSingle();
-    const hostName = hostProf?.full_name?.trim() || "Host";
+    const [hostName, participants] = await Promise.all([
+      getHostName(supabase, userId),
+      getParticipantNames(supabase, meeting.id),
+    ]);
 
-    const ai = new GoogleGenAI({ apiKey: key });
-
-    // Fetch participants to ensure accurate speaker diarization
-    const { data: participants } = await supabase
-      .from("participants")
-      .select("name, role")
-      .eq("meeting_id", data.meetingId);
-
-    const participantNames = (participants || []).map((p: any) => p.name).filter(Boolean);
-    if (!participantNames.includes(hostName)) participantNames.unshift(hostName);
-
-    // AUTOMATIC AI TRANSCRIPT CLEANING & DIARIZATION:
-    // Automatically fix speech-to-text phonetic typos (e.g. "police dashboard" -> "finish the dashboard", "by Pride" -> "by Friday")
-    // and re-align / separate conversation turns across participants before generating the summary.
-    let cleanedTranscript = transcript;
-    try {
-      if (segs && segs.length > 0) {
-        const cleanPrompt = `You are an expert AI meeting transcription cleaner and diarizer.
-
-Meeting Title: ${meeting.title}
-Known Participants: ${participantNames.join(", ")}
-Host/User: ${hostName}
-
-Raw Speech-To-Text Transcripts:
-${transcript}
-
-TASK:
-1. Fix all speech-to-text phonetic mistranslations and typos based on conversation context (e.g., "police dashboard" -> "finish the dashboard", "by Pride" -> "by Friday", "content development" -> "frontend development").
-2. Correctly separate conversation turns and attribute each line to the proper speaker. If speaker 1 is remote/client and speaker 2 is ${hostName}, distinguish their back-and-forth accurately.
-3. Keep the conversation accurate, natural, and clear. Do not invent fictitious topics.
-4. Output STRICT JSON with "cleaned_transcripts" containing an array of objects with { "speaker": string, "content": string }.`;
-
-        const cleanConfig = {
-          model: "gemini-3.7-flash",
-          temperature: 0.1,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              cleaned_transcripts: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    speaker: { type: Type.STRING },
-                    content: { type: Type.STRING },
-                  },
-                  required: ["speaker", "content"],
-                },
-              },
-            },
-            required: ["cleaned_transcripts"],
-          },
-        };
-
-        const cleanTimeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Cleaning step timeout")), 12000),
-        );
-        const cleanRes: any = await Promise.race([
-          generateWithRetry(ai, {
-            contents: [{ text: cleanPrompt }],
-            config: cleanConfig,
-          }),
-          cleanTimeoutPromise,
-        ]);
-
-        const parsedClean = JSON.parse(cleanRes.text || "{}");
-        const cleanedList: Array<{ speaker: string; content: string }> =
-          parsedClean.cleaned_transcripts || [];
-
-        if (cleanedList.length > 0) {
-          cleanedTranscript = cleanedList
-            .map((item) => `${item.speaker}: ${item.content}`)
-            .join("\n");
-
-          // Automatically update the transcripts table in the database so the UI also shows the clean version
-          try {
-            const toInsert = cleanedList.map((item, idx) => ({
-              meeting_id: data.meetingId,
-              speaker: item.speaker,
-              content: item.content,
-              segment_index: idx,
-              spoken_at: new Date(Date.now() - (cleanedList.length - idx) * 15000).toISOString(),
-            }));
-
-            await supabase.from("transcripts").delete().eq("meeting_id", data.meetingId);
-            const { error: insErr } = await supabase.from("transcripts").insert(toInsert);
-            if (insErr) console.error("Failed to insert auto-cleaned transcripts:", insErr);
-          } catch (dbErr) {
-            console.warn("Non-fatal: failed to persist cleaned transcript to DB:", dbErr);
-          }
-        }
-      }
-    } catch (cleanErr) {
-      console.warn("Auto-clean transcript step skipped due to error:", cleanErr);
-      cleanedTranscript = transcript;
+    const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [
+      { text: summaryPrompt({ title: meeting.title, hostName, participants, transcript }) },
+    ];
+    for (const shot of data.screenshots ?? []) {
+      const { mimeType, data: b64 } = splitBase64(shot);
+      parts.push({ inlineData: { data: b64, mimeType: mimeType ?? "image/jpeg" } });
     }
 
-    const system = `You analyze meeting transcripts and return STRICT JSON only. Do not invent facts — only summarize what is present. If screenshots or presentation slides are provided, analyze them and integrate their key points into the summary seamlessly along with the spoken transcript. If information is missing, return empty arrays or a short honest note.`;
-
-    const user = `Meeting title: ${meeting.title}
-Meeting Organizer: ${hostName}
-
-Transcript:
-${cleanedTranscript}
-
-Return JSON with this exact shape:
-{
-  "executive_summary": string (2-4 sentences based only on the transcript and slides),
-  "key_points": string[] (up to 6),
-  "risks": string[] (up to 4),
-  "follow_ups": string[] (up to 5),
-  "action_items": [{"title": string, "assignee": string|null, "deadline": string|null, "status": "pending"|"done"}],
-  "decisions": [{"description": string, "made_by": string|null}]
-}
-CRITICAL RULES FOR ACCURACY & CROSS-MEETING CONSISTENCY:
-- Participant Identity: Attribute deliverables directly to specific participants mentioned in the discussion (e.g. Shreyash, Sumeet), never use generic placeholders like "Remote Participant" when an actual participant name is present.
-- Task Status: If a deliverable or task was stated or agreed to be already completed/finished/done (e.g. dashboard completed, UI improvements finished), set its status to "done". Otherwise, set status to "pending".
-- Accurate Deadlines: Use the exact time/day agreed upon in this specific meeting (e.g. "Tuesday evening", "Wednesday", "Friday").
-- Strategic Decisions: Do not repeat or duplicate decisions; ensure each decision is distinct.`;
-
-    const parts: any[] = [{ text: user }];
-
-    const screenshotsToUse = (data.screenshots || []).slice(-2);
-    if (screenshotsToUse.length > 0) {
-      for (const base64Img of screenshotsToUse) {
-        const b64 = base64Img.replace(/^data:image\/\w+;base64,/, "");
-        parts.push({
-          inlineData: {
-            data: b64,
-            mimeType: "image/jpeg",
-          },
-        });
-      }
-    }
-
-    const summaryConfig = {
-      systemInstruction: system,
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          executive_summary: { type: Type.STRING },
-          key_points: { type: Type.ARRAY, items: { type: Type.STRING } },
-          risks: { type: Type.ARRAY, items: { type: Type.STRING } },
-          follow_ups: { type: Type.ARRAY, items: { type: Type.STRING } },
-          action_items: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                assignee: { type: Type.STRING, nullable: true },
-                deadline: { type: Type.STRING, nullable: true },
-                status: { type: Type.STRING, nullable: true },
-              },
-            },
-          },
-          decisions: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                description: { type: Type.STRING },
-                made_by: { type: Type.STRING, nullable: true },
-              },
-            },
-          },
-        },
+    const res = await generateForUser(supabase, userId, "summarizeMeeting", {
+      contents: [{ role: "user", parts }],
+      config: {
+        systemInstruction: SUMMARY_SYSTEM,
+        responseMimeType: "application/json",
+        responseSchema: SUMMARY_SCHEMA,
+        temperature: 0.2,
       },
-    };
-
-    let response;
-    try {
-      response = await generateWithRetry(ai, {
-        contents: parts,
-        config: summaryConfig,
-      });
-    } catch (primaryErr) {
-      if (parts.length > 1) {
-        console.warn("Retrying with text-only transcript due to quota limits...");
-        response = await generateWithRetry(ai, {
-          contents: [{ text: user }],
-          config: summaryConfig,
-        });
-      } else {
-        throw primaryErr;
-      }
-    }
-
-    const content = response.text || "{}";
-    let parsed: SummaryPayload;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      parsed = {
-        executive_summary: content.slice(0, 500),
-        key_points: [],
-        risks: [],
-        follow_ups: [],
-        action_items: [],
-        decisions: [],
-      };
-    }
-
-    // Persist to DB (replace prior summary)
-    await supabase.from("ai_summaries").delete().eq("meeting_id", data.meetingId);
-    await supabase.from("ai_summaries").insert({
-      meeting_id: data.meetingId,
-      executive_summary: parsed.executive_summary ?? "",
-      key_points: parsed.key_points ?? [],
-      risks: parsed.risks ?? [],
-      follow_ups: parsed.follow_ups ?? [],
     });
+    const parsed = parseAi(aiSummary, res.text);
+    if (!parsed.executive_summary) {
+      throw new Error("The AI returned an empty summary. Please try again.");
+    }
 
-    const normalizeAssignee = (raw: string | null | undefined) => {
-      if (!raw || !raw.trim()) return hostName;
-      const lower = raw.trim().toLowerCase();
-      if (["you", "host", "me", "i", "myself", "current user", "organizer"].includes(lower)) {
-        return hostName;
-      }
-      return raw.trim();
+    const { error: sumErr } = await supabase.from("ai_summaries").upsert(
+      {
+        meeting_id: meeting.id,
+        executive_summary: parsed.executive_summary,
+        key_points: parsed.key_points,
+        risks: parsed.risks,
+        follow_ups: parsed.follow_ups,
+      },
+      { onConflict: "meeting_id" },
+    );
+    if (sumErr) fail("save summary", sumErr, "Could not save the summary.");
+
+    const savedItems = await saveExtractedActionItems(supabase, meeting, parsed.action_items, {
+      hostName,
+    });
+    await replaceDecisions(supabase, meeting.id, parsed.decisions);
+
+    const { error: notifErr } = await supabase.from("notifications").insert({
+      user_id: userId,
+      type: "summary_ready",
+      title: `Summary ready: ${meeting.title}`.slice(0, 200),
+      body: parsed.executive_summary.slice(0, 280),
+      link: `/meetings/${meeting.id}`,
+    });
+    // The summary itself is saved; a missing notification is logged, not fatal.
+    if (notifErr) console.error("[db] summary notification:", notifErr.message);
+
+    return {
+      executive_summary: parsed.executive_summary,
+      key_points: parsed.key_points,
+      risks: parsed.risks,
+      follow_ups: parsed.follow_ups,
+      action_items: savedItems.map((a) => ({
+        title: a.title,
+        assignee: a.assignee,
+        deadline: a.deadline,
+      })),
+      decisions: parsed.decisions.map((d) => ({ description: d.description, made_by: d.made_by })),
     };
-
-    let itemsToInsert = parsed.action_items || [];
-    // If Gemini missed action_items but returned follow_ups, use follow_ups as action items
-    if (itemsToInsert.length === 0 && (parsed.follow_ups || []).length > 0) {
-      itemsToInsert = parsed.follow_ups.map((f: string) => ({
-        title: f,
-        assignee: hostName,
-        deadline: null,
-        status: "pending",
-      }));
-    }
-
-    await supabase.from("action_items").delete().eq("meeting_id", data.meetingId);
-    if (itemsToInsert.length > 0) {
-      const meetingRef = meeting?.scheduled_at || meeting?.created_at || new Date();
-      await supabase.from("action_items").insert(
-        itemsToInsert.map((a: any) => {
-          const { id: stableId } = getStableTaskId(a.title);
-          return {
-            id: stableId,
-            meeting_id: data.meetingId,
-            title: a.title,
-            assignee: normalizeAssignee(a.assignee),
-            deadline: a.deadline
-              ? resolveDeadlineToISODate(a.deadline, meetingRef) || a.deadline
-              : null,
-            status: a.status === "done" ? "done" : "pending",
-          };
-        }),
-      );
-    }
-
-    await supabase.from("decisions").delete().eq("meeting_id", data.meetingId);
-    if (parsed.decisions?.length) {
-      const uniqueDecisions = deduplicateDecisions(parsed.decisions);
-
-      await supabase.from("decisions").insert(
-        uniqueDecisions.map((d) => ({
-          meeting_id: data.meetingId,
-          description: d.description,
-          made_by: d.made_by || "Both Participants",
-        })),
-      );
-    }
-
-    return parsed;
   });
+
+// ---------------------------------------------------------------------------
+// syncMeetingActionItems
+// ---------------------------------------------------------------------------
+
+const MeetingIdInput = z.object({ meetingId: uuid });
 
 export const syncMeetingActionItems = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: { meetingId: string }) => {
-    if (!input?.meetingId || typeof input.meetingId !== "string") {
-      throw new Error("meetingId is required");
-    }
-    return input;
-  })
-  .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) throw new Error("Missing GEMINI_API_KEY");
+  .inputValidator((input: z.input<typeof MeetingIdInput>) => parseInput(MeetingIdInput, input))
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ action_items: ActionItemRow[]; decisions: DecisionRow[] }> => {
+      const { supabase, userId } = context;
+      const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
 
-    const [{ data: meeting }, { data: hostProf }, { data: segs }, { data: summary }] =
-      await Promise.all([
-        supabase
-          .from("meetings")
-          .select("id, title, host_id, scheduled_at, created_at")
-          .eq("id", data.meetingId)
-          .single(),
-        supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle(),
+      const [hostName, segsRes, summaryRes] = await Promise.all([
+        getHostName(supabase, userId),
         supabase
           .from("transcripts")
           .select("speaker, content")
-          .eq("meeting_id", data.meetingId)
+          .eq("meeting_id", meeting.id)
           .order("segment_index", { ascending: true }),
         supabase
           .from("ai_summaries")
-          .select("executive_summary, key_points, follow_ups")
-          .eq("meeting_id", data.meetingId)
+          .select("executive_summary, key_points")
+          .eq("meeting_id", meeting.id)
           .maybeSingle(),
       ]);
+      if (segsRes.error) fail("load transcript", segsRes.error, "Could not load the transcript.");
+      if (summaryRes.error) fail("load summary", summaryRes.error, "Could not load the summary.");
 
-    if (!meeting) throw new Error("Meeting not found");
+      const transcript = transcriptText(segsRes.data);
+      const summary = summaryRes.data?.executive_summary ?? "";
+      const keyPoints = Array.isArray(summaryRes.data?.key_points)
+        ? (summaryRes.data.key_points as unknown[]).filter(
+            (k): k is string => typeof k === "string",
+          )
+        : [];
+      if (!transcript.trim() && !summary.trim()) {
+        throw new Error("This meeting has no transcript or summary to extract tasks from.");
+      }
 
-    const hostName = hostProf?.full_name?.trim() || "Host";
-    const transcriptText = (segs ?? []).map((s: any) => `${s.speaker}: ${s.content}`).join("\n");
-    const summaryText = summary?.executive_summary || "";
-
-    const userPrompt = `Meeting Title: ${meeting.title}
-Meeting Host: ${hostName}
-
-Executive Summary:
-${summaryText}
-
-Key Discussion Highlights:
-${((summary?.key_points || []) as string[]).join("\n")}
-
-Transcript:
-${transcriptText}
-
-TASK:
-1. Extract ALL action items, deliverables, and assignments for EVERY participant mentioned in the summary or transcript (e.g. "${hostName}" or specific attendee like "Shreyash").
-2. Participant Identity: Accurately attribute tasks to participants by their actual names mentioned (e.g. "Shreyash"), never use generic placeholders like "Remote Participant" when a name is present.
-3. Task Status: If a deliverable was reported completed or finished, set its status to "done", otherwise "pending".
-4. Exact Deadlines: Use the exact deadline mentioned (e.g. "Tuesday evening", "Wednesday", "Friday").
-5. Extract key strategic decisions agreed upon during the meeting without duplicates.
-
-Return JSON with this exact shape:
-{
-  "action_items": [
-    {
-      "title": string,
-      "assignee": string|null,
-      "deadline": string|null,
-      "status": "pending"|"done"
-    }
-  ],
-  "decisions": [
-    {
-      "description": string,
-      "made_by": string|null
-    }
-  ]
-}`;
-
-    const ai = new GoogleGenAI({ apiKey: key });
-    let parsed: any = {};
-    try {
-      const response = await generateWithRetry(ai, {
-        contents: [{ text: userPrompt }],
-        config: {
-          systemInstruction:
-            "You are an expert AI meeting assistant. Extract exact, actionable tasks with assignees, status, and deadlines, and distinct strategic decisions from meeting summaries and transcripts.",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              action_items: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING },
-                    assignee: { type: Type.STRING, nullable: true },
-                    deadline: { type: Type.STRING, nullable: true },
-                    status: { type: Type.STRING, nullable: true },
-                  },
-                  required: ["title"],
-                },
+      const res = await generateForUser(supabase, userId, "syncMeetingActionItems", {
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: extractionPrompt({
+                  title: meeting.title,
+                  hostName,
+                  summary,
+                  keyPoints,
+                  transcript,
+                }),
               },
-              decisions: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    description: { type: Type.STRING },
-                    made_by: { type: Type.STRING, nullable: true },
-                  },
-                  required: ["description"],
-                },
-              },
-            },
+            ],
           },
+        ],
+        config: {
+          systemInstruction: EXTRACTION_SYSTEM,
+          responseMimeType: "application/json",
+          responseSchema: EXTRACTION_SCHEMA,
+          temperature: 0.1,
         },
       });
-      parsed = JSON.parse(response.text || "{}");
-    } catch (e) {
-      console.warn("AI extraction warning, applying heuristic fallback:", e);
-    }
+      const parsed = parseAi(aiExtraction, res.text);
 
-    let items = parsed.action_items || [];
-    let decisions = parsed.decisions || [];
-
-    const normalizeAssignee = (raw: string | null | undefined) => {
-      if (!raw || !raw.trim()) return hostName;
-      const lower = raw.trim().toLowerCase();
-      if (["you", "host", "me", "i", "myself", "current user", "organizer"].includes(lower)) {
-        return hostName;
-      }
-      return raw.trim();
-    };
-
-    const meetingRef = meeting?.scheduled_at || meeting?.created_at || new Date();
-    const friDate = resolveDeadlineToISODate("Friday", meetingRef) || "2026-10-23";
-    const wedDate = resolveDeadlineToISODate("Wednesday", meetingRef) || "2026-10-21";
-    const tueDate = resolveDeadlineToISODate("Tuesday evening", meetingRef) || "2026-10-20";
-
-    // Heuristic extraction from summary if AI returned empty items
-    if (items.length === 0) {
-      const followUps = (summary?.follow_ups || []) as string[];
-      if (followUps.length > 0) {
-        for (const f of followUps) {
-          const fLower = f.toLowerCase();
-          let dLine = friDate;
-          if (fLower.includes("wednesday")) dLine = wedDate;
-          else if (fLower.includes("tuesday")) dLine = tueDate;
-          items.push({
-            title: f,
-            assignee: hostName,
-            deadline: dLine,
-          });
-        }
-      }
-
-      const allText = `${summaryText}. ${((summary?.key_points || []) as string[]).join(". ")}`;
-      const sentences = allText
-        .split(/\. |\.\n/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-      for (const s of sentences) {
-        const lower = s.toLowerCase();
-        if (lower.includes("registration") || lower.includes("participant list")) {
-          items.push({
-            title: "Handle registration and prepare participant list",
-            assignee: hostName,
-            deadline: friDate,
-          });
-        } else if (lower.includes("decoration")) {
-          items.push({
-            title: "Take care of decoration for the event",
-            assignee: "Remote Participant",
-            deadline: null,
-          });
-        } else if (
-          lower.includes("agreed to") ||
-          lower.includes("will ") ||
-          lower.includes("prepare") ||
-          lower.includes("handle") ||
-          lower.includes("task") ||
-          lower.includes("owns")
-        ) {
-          let clean = s;
-          let assignee = hostName;
-          if (lower.includes("remote participant will")) {
-            assignee = "Remote Participant";
-            clean = s.replace(/remote participant will/i, "").trim();
-          } else if (lower.includes("sumeet made will") || lower.includes("sumeet will")) {
-            assignee = hostName;
-            clean = s.replace(/sumeet( made)? will/i, "").trim();
-          }
-          clean = clean.charAt(0).toUpperCase() + clean.slice(1);
-          if (
-            clean.length > 5 &&
-            !items.some((it: any) => it.title.toLowerCase() === clean.toLowerCase())
-          ) {
-            let dLine = null;
-            if (lower.includes("friday")) dLine = friDate;
-            else if (lower.includes("wednesday")) dLine = wedDate;
-            else if (lower.includes("tuesday")) dLine = tueDate;
-            items.push({ title: clean, assignee, deadline: dLine });
-          }
-        }
-      }
-    }
-
-    if (decisions.length === 0 && summaryText) {
-      if (
-        summaryText.toLowerCase().includes("college event") ||
-        summaryText.toLowerCase().includes("event")
-      ) {
-        decisions.push({
-          description: "Divide college event responsibilities between registration and decoration",
-          made_by: "Both Participants",
-        });
-        decisions.push({
-          description: "Complete all assigned event preparation tasks by Friday",
-          made_by: "Both Participants",
-        });
-      }
-    }
-
-    let insertedActions: any[] = [];
-    if (items.length > 0) {
-      await supabase.from("action_items").delete().eq("meeting_id", data.meetingId);
-      const contextFull = `${transcriptText} ${summaryText}`;
-      const toInsert = items.map((a: any) => {
-        const { id: stableId, key: taskKey } = getStableTaskId(a.title);
-        let status = a.status === "done" ? "done" : "pending";
-        if (confirmsCompletion(contextFull, taskKey)) {
-          status = "done";
-        }
-        return {
-          id: stableId,
-          meeting_id: data.meetingId,
-          title: a.title,
-          assignee: normalizeAssignee(a.assignee),
-          deadline: a.deadline
-            ? resolveDeadlineToISODate(a.deadline, meetingRef) || a.deadline
-            : null,
-          status,
-        };
+      const action_items = await saveExtractedActionItems(supabase, meeting, parsed.action_items, {
+        hostName,
+        evidenceText: `${transcript}\n${summary}\n${keyPoints.join("\n")}`,
       });
-      const { data: inserted, error: iErr } = await supabase
-        .from("action_items")
-        .insert(toInsert)
-        .select();
-      if (iErr) {
-        console.warn("action_items insert.select() failed, retrying plain insert:", iErr);
-        await supabase.from("action_items").insert(toInsert);
-        insertedActions = toInsert;
-      } else {
-        insertedActions = inserted || [];
-      }
-    }
+      const decisions = await replaceDecisions(supabase, meeting.id, parsed.decisions);
+      return { action_items, decisions };
+    },
+  );
 
-    let insertedDecisions: any[] = [];
-    if (decisions.length > 0) {
-      const uniqueDecisions = deduplicateDecisions(decisions);
+// ---------------------------------------------------------------------------
+// generateMeetingRecaps (no AI call: composes recap emails from saved data)
+// ---------------------------------------------------------------------------
 
-      await supabase.from("decisions").delete().eq("meeting_id", data.meetingId);
-      const decToInsert = uniqueDecisions.map((d: any) => ({
-        meeting_id: data.meetingId,
-        description: d.description,
-        made_by: d.made_by || "Both Participants",
-      }));
-      const { data: decIns, error: dErr } = await supabase
-        .from("decisions")
-        .insert(decToInsert)
-        .select();
-      if (dErr) {
-        console.warn("decisions insert.select() failed, retrying plain insert:", dErr);
-        await supabase.from("decisions").insert(decToInsert);
-        insertedDecisions = decToInsert.map((d: any) => ({ ...d, id: crypto.randomUUID() }));
-      } else {
-        insertedDecisions = decIns || [];
-      }
-    }
-
-    return {
-      action_items: insertedActions,
-      decisions: insertedDecisions,
-    };
-  });
+function assigneeNames(assignee: string | null): string[] {
+  return (assignee ?? "")
+    .split(/,|&|\band\b/i)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
 
 export const generateMeetingRecaps = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: { meetingId: string }) => {
-    if (!input?.meetingId || typeof input.meetingId !== "string") {
-      throw new Error("meetingId is required");
-    }
-    return input;
-  })
+  .inputValidator((input: z.input<typeof MeetingIdInput>) => parseInput(MeetingIdInput, input))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
 
-    // Fetch meeting, summary, tasks, and participants
-    const [{ data: meeting }, { data: summary }, { data: actions }, { data: participants }] =
-      await Promise.all([
-        supabase.from("meetings").select("*").eq("id", data.meetingId).single(),
-        supabase.from("ai_summaries").select("*").eq("meeting_id", data.meetingId).single(),
-        supabase.from("action_items").select("*").eq("meeting_id", data.meetingId),
-        supabase.from("participants").select("*").eq("meeting_id", data.meetingId),
-      ]);
+    const [summaryRes, actionsRes, participantsRes] = await Promise.all([
+      supabase.from("ai_summaries").select("*").eq("meeting_id", meeting.id).maybeSingle(),
+      supabase.from("action_items").select("*").eq("meeting_id", meeting.id),
+      supabase.from("participants").select("*").eq("meeting_id", meeting.id),
+    ]);
+    if (summaryRes.error) fail("load summary", summaryRes.error, "Could not load the summary.");
+    if (actionsRes.error) fail("load tasks", actionsRes.error, "Could not load the tasks.");
+    if (participantsRes.error)
+      fail("load participants", participantsRes.error, "Could not load the participants.");
+    if (!summaryRes.data) throw new Error("Generate a summary before creating recaps.");
 
-    if (!meeting || !summary) throw new Error("Meeting or summary not found");
+    const summary = summaryRes.data;
+    const actions = actionsRes.data ?? [];
 
-    const recaps: Array<{
-      participantName: string;
-      email: string | null;
-      subject: string;
-      body: string;
-    }> = [];
+    return (participantsRes.data ?? []).map((p) => {
+      const name = p.name.trim() || "Participant";
+      const mine = actions.filter((a) => assigneeNames(a.assignee).includes(name.toLowerCase()));
+      const others = actions.filter((a) => !mine.includes(a));
+      const due = (d: string | null) =>
+        d ? new Date(d).toLocaleDateString("en-GB") : "no deadline";
 
-    // For each participant, generate a personalized email
-    for (const p of participants || []) {
-      const pName = p.name || "Participant";
-      // Filter tasks assigned to this person (fuzzy match)
-      const myTasks = (actions || []).filter(
-        (a) => a.assignee && a.assignee.toLowerCase().includes(pName.toLowerCase().split(" ")[0]),
-      );
-
-      const otherTasks = (actions || []).filter((a) => !myTasks.includes(a));
-
-      let body = `Hi ${pName},\n\nHere is the recap from our meeting: "${meeting.title}".\n\n`;
-      body += `**Executive Summary:**\n${summary.executive_summary}\n\n`;
-
-      if (myTasks.length > 0) {
-        body += `🚨 **YOUR ACTION ITEMS:**\n`;
-        myTasks.forEach((t) => {
-          body += `- [ ] ${t.title} (Due: ${t.deadline ? new Date(t.deadline).toLocaleDateString() : "TBD"})\n`;
-        });
+      let body = `Hi ${name},\n\nHere is the recap of "${meeting.title}".\n\n`;
+      body += `Summary:\n${summary.executive_summary ?? ""}\n\n`;
+      if (mine.length > 0) {
+        body += `Your action items:\n`;
+        for (const t of mine) body += `- ${t.title} (due ${due(t.deadline)})\n`;
         body += `\n`;
       } else {
-        body += `✅ You have no specific action items assigned from this meeting.\n\n`;
+        body += `You have no action items from this meeting.\n\n`;
       }
-
-      if (otherTasks.length > 0) {
-        body += `**Other Action Items:**\n`;
-        otherTasks.forEach((t) => {
-          body += `- ${t.title} (Assigned to: ${t.assignee || "Unassigned"})\n`;
-        });
+      if (others.length > 0) {
+        body += `Other action items:\n`;
+        for (const t of others) body += `- ${t.title} (${t.assignee || "unassigned"})\n`;
         body += `\n`;
       }
+      body += `Sent from AI Powered Meeting Companion`;
 
-      body += `Best,\nAI Powered Meeting Companion`;
-
-      recaps.push({
-        participantName: pName,
+      return {
+        participantName: name,
         email: p.email,
-        subject: `Meeting Recap: ${meeting.title}`,
+        subject: `Meeting recap: ${meeting.title}`,
         body,
-      });
-    }
-
-    return recaps;
+      };
+    });
   });
+
+// ---------------------------------------------------------------------------
+// generateProjectSummary
+// ---------------------------------------------------------------------------
+
+const ProjectInput = z.object({ projectId: uuid });
 
 export const generateProjectSummary = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: { projectId: string }) => {
-    if (!input?.projectId) throw new Error("projectId is required");
-    return input;
-  })
+  .inputValidator((input: z.input<typeof ProjectInput>) => parseInput(ProjectInput, input))
   .handler(async ({ data, context }) => {
-    const { supabase } = context;
-    const key = process.env.GEMINI_API_KEY;
+    const { supabase, userId } = context;
 
-    // Fetch project details
-    const { data: project } = await supabase
+    const { data: project, error: pErr } = await supabase
       .from("projects")
-      .select("id, name")
+      .select("id, name, owner_id")
       .eq("id", data.projectId)
       .maybeSingle();
+    if (pErr) fail("load project", pErr, "Could not load the project.");
+    if (!project || project.owner_id !== userId) throw new Error("Project not found.");
 
-    // Fetch all meetings for the project in chronological order
-    const { data: meetings } = await supabase
+    const { data: meetings, error: mErr } = await supabase
       .from("meetings")
-      .select("id, title, scheduled_at")
-      .eq("project_id", data.projectId)
-      .order("scheduled_at", { ascending: true });
+      .select("id, title, scheduled_at, created_at")
+      .eq("project_id", project.id)
+      .eq("host_id", userId)
+      .order("scheduled_at", { ascending: true, nullsFirst: false });
+    if (mErr) fail("load project meetings", mErr, "Could not load the project's meetings.");
 
     if (!meetings || meetings.length === 0) {
       return {
         progress_report: "No meetings found for this project yet.",
-        suggested_agenda: [],
+        suggested_agenda: [] as string[],
+        verified_completed: [],
+        verified_pending: [],
+        verified_decisions: [],
+        conflicts: [],
+        ai_enhanced: false,
       };
     }
 
-    const meetingIds = meetings.map((m) => m.id);
+    const ids = meetings.map((m) => m.id);
+    const [summaries, actions, decisions, transcripts, participants] = await Promise.all([
+      supabase
+        .from("ai_summaries")
+        .select("meeting_id, executive_summary, key_points")
+        .in("meeting_id", ids),
+      supabase.from("action_items").select("*").in("meeting_id", ids),
+      supabase.from("decisions").select("*").in("meeting_id", ids),
+      supabase.from("transcripts").select("meeting_id, speaker, content").in("meeting_id", ids),
+      supabase.from("participants").select("name").in("meeting_id", ids),
+    ]);
+    for (const r of [summaries, actions, decisions, transcripts, participants]) {
+      if (r.error) fail("load project records", r.error, "Could not load the project's records.");
+    }
 
-    // Fetch all context across project meetings
-    const [{ data: summaries }, { data: actions }, { data: decisions }, { data: transcripts }] =
-      await Promise.all([
-        supabase.from("ai_summaries").select("*").in("meeting_id", meetingIds),
-        supabase.from("action_items").select("*").in("meeting_id", meetingIds),
-        supabase.from("decisions").select("*").in("meeting_id", meetingIds),
-        supabase
-          .from("transcripts")
-          .select("meeting_id, speaker, content")
-          .in("meeting_id", meetingIds),
-      ]);
-
-    // Build verified ground-truth cumulative summary from persisted records
-    const verifiedResult = buildVerifiedCumulativeSummary(
-      { id: data.projectId, name: project?.name || "Project" },
-      meetings,
-      summaries || [],
-      actions || [],
-      decisions || [],
-      transcripts || [],
+    const verified = buildVerifiedCumulativeSummary(
+      { id: project.id, name: project.name },
+      meetings.map((m) => ({ ...m, scheduled_at: m.scheduled_at ?? m.created_at })),
+      summaries.data ?? [],
+      actions.data ?? [],
+      decisions.data ?? [],
+      transcripts.data ?? [],
+      (participants.data ?? []).map((p) => p.name),
     );
 
-    // If no Gemini API key, return the verified result directly
-    if (!key) {
-      return {
-        progress_report: verifiedResult.progress_report,
-        suggested_agenda: verifiedResult.suggested_agenda,
-        verified_completed: verifiedResult.verified_completed,
-        verified_pending: verifiedResult.verified_pending,
-        verified_decisions: verifiedResult.verified_decisions,
-        conflicts: verifiedResult.conflicts,
-      };
-    }
+    const base = {
+      progress_report: verified.progress_report,
+      suggested_agenda: verified.suggested_agenda,
+      verified_completed: verified.verified_completed,
+      verified_pending: verified.verified_pending,
+      verified_decisions: verified.verified_decisions,
+      conflicts: verified.conflicts,
+    };
 
-    // Synthesize with Gemini while enforcing strict anti-hallucination ground truth
-    const system = `You are an expert AI Project Manager synthesizing recurring project meeting records into a clean cumulative summary.
-CRITICAL GROUND TRUTH RULES:
-1. Grounding: You must summarize ONLY facts from the provided verified ground-truth context.
-2. Deliverables & Tasks: Keep all confirmed completed deliverables as completed. Preserve all pending deliverables and review commitments (specifically the Friday joint review commitment). DO NOT drop pending commitments.
-3. Anti-Hallucination: Do NOT invent participant names, deadlines, completion statuses, or progress milestones not present in the record.
-4. Discrepancies: If any record discrepancies or conflicts are noted in the ground truth, highlight them.
-5. Return strictly JSON with: { "progress_report": string, "suggested_agenda": string[] }`;
-
-    const prompt = `Verified Ground-Truth Context:
-${verifiedResult.progress_report}
-
-Outstanding Commitments to Preserve:
-${verifiedResult.verified_pending.map((t) => `- [${t.status}] ${t.title} (${t.assignee}, Due: ${t.deadline || "upcoming"})`).join("\n") || "None"}
-
-Return JSON conforming strictly to the ground-truth facts.`;
-
-    try {
-      const ai = new GoogleGenAI({ apiKey: key });
-      const response = await generateWithRetry(ai, {
-        contents: [{ text: prompt }],
-        config: {
-          systemInstruction: system,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              progress_report: { type: Type.STRING },
-              suggested_agenda: { type: Type.ARRAY, items: { type: Type.STRING } },
+    const res = await generateForUser(supabase, userId, "generateProjectSummary", {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: projectPrompt({
+                verifiedReport: verified.progress_report,
+                pending:
+                  verified.verified_pending
+                    .map(
+                      (t) =>
+                        `- [${t.status}] ${t.title} (${t.assignee ?? "unassigned"}, due ${t.deadline ?? "not set"})`,
+                    )
+                    .join("\n") || "None",
+              }),
             },
-          },
+          ],
         },
-      });
-
-      const parsed = JSON.parse(response.text || "{}");
-      if (parsed.progress_report) {
-        let progressReport = parsed.progress_report;
-        // Verify that the Friday review commitment was not dropped by AI
-        const hasFridayReview =
-          progressReport.toLowerCase().includes("friday") ||
-          progressReport.toLowerCase().includes("joint review");
-        if (
-          !hasFridayReview &&
-          verifiedResult.verified_pending.some((p) => p.canonical_key === "task:joint_review")
-        ) {
-          progressReport += `\n\n#### ⏳ Preserved Commitments:\n- **Joint review of all completed deliverables**: Scheduled for **Friday** with Shreyash & Sumeet Made.`;
-        }
-
-        const agenda =
-          Array.isArray(parsed.suggested_agenda) && parsed.suggested_agenda.length > 0
-            ? parsed.suggested_agenda
-            : verifiedResult.suggested_agenda;
-
-        return {
-          progress_report: progressReport,
-          suggested_agenda: agenda,
-          verified_completed: verifiedResult.verified_completed,
-          verified_pending: verifiedResult.verified_pending,
-          verified_decisions: verifiedResult.verified_decisions,
-          conflicts: verifiedResult.conflicts,
-        };
-      }
-    } catch (err) {
-      console.warn("AI generation note, using verified grounded summary:", err);
+      ],
+      config: {
+        systemInstruction: PROJECT_SYSTEM,
+        responseMimeType: "application/json",
+        responseSchema: PROJECT_SCHEMA,
+        temperature: 0.2,
+      },
+    });
+    const parsed = parseAi(
+      z.object({
+        progress_report: z.string().trim(),
+        suggested_agenda: strList(5),
+      }),
+      res.text,
+    );
+    if (!parsed.progress_report) {
+      throw new Error("The AI returned an empty project summary. Please try again.");
     }
 
     return {
-      progress_report: verifiedResult.progress_report,
-      suggested_agenda: verifiedResult.suggested_agenda,
-      verified_completed: verifiedResult.verified_completed,
-      verified_pending: verifiedResult.verified_pending,
-      verified_decisions: verifiedResult.verified_decisions,
-      conflicts: verifiedResult.conflicts,
+      ...base,
+      progress_report: parsed.progress_report,
+      suggested_agenda: parsed.suggested_agenda.length
+        ? parsed.suggested_agenda
+        : base.suggested_agenda,
+      ai_enhanced: true,
     };
   });
 
+// ---------------------------------------------------------------------------
+// askChatBot
+// ---------------------------------------------------------------------------
+
+const ChatInput = z.object({ message: str(4000).min(1, "Message is empty") });
+const CHAT_HISTORY_LIMIT = 20;
+
 export const askChatBot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: { messages: { role: "user" | "assistant"; content: string }[] }) => {
-    if (!input?.messages) throw new Error("Messages are required");
-    return input;
-  })
-  .handler(async ({ data, context }) => {
-    const { supabase } = context;
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) throw new Error("Missing GEMINI_API_KEY");
+  .inputValidator((input: z.input<typeof ChatInput>) => parseInput(ChatInput, input))
+  .handler(async ({ data, context }): Promise<{ reply: string }> => {
+    const { supabase, userId } = context;
 
-    // Fetch context
-    const [{ data: meetings }, { data: summaries }, { data: actions }, { data: decisions }] =
-      await Promise.all([
-        supabase.from("meetings").select("id, title, scheduled_at"),
-        supabase.from("ai_summaries").select("meeting_id, executive_summary"),
-        supabase.from("action_items").select("*"),
-        supabase.from("decisions").select("*"),
-      ]);
+    const [historyRes, meetingsRes] = await Promise.all([
+      supabase
+        .from("chat_messages")
+        .select("role, content, created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(CHAT_HISTORY_LIMIT),
+      supabase
+        .from("meetings")
+        .select("id, title, scheduled_at, created_at, status")
+        .eq("host_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(30),
+    ]);
+    if (historyRes.error)
+      fail("load chat history", historyRes.error, "Could not load your chat history.");
+    if (meetingsRes.error)
+      fail("load meetings", meetingsRes.error, "Could not load your meetings.");
 
-    let contextData = "DATABASE OF ALL YOUR PAST MEETINGS, DECISIONS, AND ACTION ITEMS:\n\n";
-    (meetings || []).forEach((m) => {
-      contextData += `MEETING: "${m.title}" on ${m.scheduled_at}\n`;
-      const s = (summaries || []).find((x) => x.meeting_id === m.id);
-      if (s) contextData += `SUMMARY: ${s.executive_summary}\n`;
-
-      const md = (decisions || []).filter((x) => x.meeting_id === m.id);
-      if (md.length > 0)
-        contextData += `DECISIONS MADE: ${md.map((d) => d.description).join(" | ")}\n`;
-
-      contextData += "\n";
-    });
-
-    const pending = (actions || []).filter((a) => a.status !== "done");
-    if (pending.length > 0) {
-      contextData += "OUTSTANDING ACTION ITEMS (TASKS TO DO):\n";
-      pending.forEach(
-        (a) =>
-          (contextData += `- ${a.title} (Assigned to: ${a.assignee || "Unassigned"}, Due: ${a.deadline || "None"})\n`),
-      );
+    const meetings = meetingsRes.data ?? [];
+    const ids = meetings.map((m) => m.id);
+    const [summaries, decisions, ownTasks, assignedTasks] = await Promise.all([
+      ids.length
+        ? supabase
+            .from("ai_summaries")
+            .select("meeting_id, executive_summary")
+            .in("meeting_id", ids)
+        : Promise.resolve({ data: [], error: null }),
+      ids.length
+        ? supabase.from("decisions").select("meeting_id, description").in("meeting_id", ids)
+        : Promise.resolve({ data: [], error: null }),
+      ids.length
+        ? supabase
+            .from("action_items")
+            .select("meeting_id, title, assignee, deadline, status")
+            .in("meeting_id", ids)
+            .neq("status", "done")
+        : Promise.resolve({ data: [], error: null }),
+      supabase
+        .from("action_items")
+        .select("meeting_id, title, assignee, deadline, status")
+        .eq("assignee_user_id", userId)
+        .neq("status", "done"),
+    ]);
+    for (const r of [summaries, decisions, ownTasks, assignedTasks]) {
+      if (r.error) fail("load chat context", r.error, "Could not load your meeting records.");
     }
 
-    const system = `You are a highly intelligent AI Meeting Companion. Your job is to answer questions about the user's past meetings, decisions, and tasks based strictly on the provided DATABASE context. Be conversational, helpful, and concise. Do NOT make up facts. If the information isn't in the database, say so politely.\n\n${contextData}`;
+    let ctx = "";
+    for (const m of meetings) {
+      ctx += `MEETING: "${m.title}" (${m.status}, ${m.scheduled_at ?? m.created_at})\n`;
+      const s = (summaries.data ?? []).find((x) => x.meeting_id === m.id);
+      if (s?.executive_summary) ctx += `Summary: ${s.executive_summary}\n`;
+      const ds = (decisions.data ?? []).filter((d) => d.meeting_id === m.id);
+      if (ds.length) ctx += `Decisions: ${ds.map((d) => d.description).join(" | ")}\n`;
+      ctx += "\n";
+    }
+    const open = new Map<
+      string,
+      { title: string; assignee: string | null; deadline: string | null; status: string }
+    >();
+    for (const t of [...(ownTasks.data ?? []), ...(assignedTasks.data ?? [])]) {
+      open.set(`${t.meeting_id}:${t.title}`, t);
+    }
+    if (open.size) {
+      ctx += "OPEN TASKS:\n";
+      for (const t of open.values()) {
+        ctx += `- ${t.title} (${t.status}; assigned to ${t.assignee ?? "nobody"}; due ${t.deadline ?? "not set"})\n`;
+      }
+    }
+    if (!ctx.trim()) ctx = "The user has no meetings or tasks yet.";
 
-    const ai = new GoogleGenAI({ apiKey: key });
-
-    // Format messages for Gemini
-    // Gemini chat API format needs contents array
-    const contents = data.messages.map((m) => ({
+    const history = (historyRes.data ?? []).reverse().map((m) => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content }],
     }));
 
-    const response = await generateWithRetry(ai, {
-      contents: contents,
-      config: {
-        systemInstruction: system,
-      },
+    const res = await generateForUser(supabase, userId, "askChatBot", {
+      contents: [...history, { role: "user", parts: [{ text: data.message }] }],
+      config: { systemInstruction: chatSystem(ctx), temperature: 0.4 },
     });
+    const reply = res.text.trim();
+    if (!reply) throw new Error("The AI returned an empty reply. Please try again.");
 
-    return response.text || "I'm sorry, I couldn't generate a response.";
+    const now = Date.now();
+    const { error: saveErr } = await supabase.from("chat_messages").insert([
+      {
+        user_id: userId,
+        role: "user",
+        content: data.message,
+        created_at: new Date(now).toISOString(),
+      },
+      {
+        user_id: userId,
+        role: "assistant",
+        content: reply.slice(0, 20000),
+        created_at: new Date(now + 1).toISOString(),
+      },
+    ]);
+    if (saveErr) fail("save chat", saveErr, "Could not save the conversation.");
+
+    return { reply };
   });
+
+// ---------------------------------------------------------------------------
+// transcribeRemoteAudio
+// ---------------------------------------------------------------------------
+
+const AUDIO_TYPES = [
+  "audio/webm",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/aac",
+];
+
+const TranscribeInput = z.object({
+  meetingId: uuid,
+  base64Audio: base64Field(MAX_AUDIO_BYTES, "Audio clip"),
+  segmentIndex: z.number().int().min(0).max(1_000_000),
+  screenshotBase64: base64Field(MAX_SCREENSHOT_BYTES, "Screenshot").optional(),
+  knownParticipants: z.array(str(100)).max(50).optional(),
+  /** Ignored: the host name always comes from the caller's profile. */
+  hostName: z.string().max(200).optional(),
+});
+
+const PLACEHOLDER_SPEAKERS = new Set(["remote", "remote participant", "unknown", "speaker"]);
 
 export const transcribeRemoteAudio = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator(
-    (input: {
-      meetingId: string;
-      base64Audio: string;
-      segmentIndex: number;
-      screenshotBase64?: string;
-      knownParticipants?: string[];
-      hostName?: string;
-    }) => {
-      if (!input?.meetingId || !input?.base64Audio) {
-        throw new Error("meetingId and base64Audio are required");
-      }
-      return input;
-    },
-  )
+  .inputValidator((input: z.input<typeof TranscribeInput>) => parseInput(TranscribeInput, input))
   .handler(async ({ data, context }) => {
-    const { supabase } = context;
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) throw new Error("Missing GEMINI_API_KEY");
+    const { supabase, userId } = context;
+    const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
+    const [hostName, existingNames] = await Promise.all([
+      getHostName(supabase, userId),
+      getParticipantNames(supabase, meeting.id),
+    ]);
 
-    const ai = new GoogleGenAI({ apiKey: key });
-
-    // The base64 string usually includes the data URL prefix (e.g., data:audio/webm;base64,...)
-    // We strip it if present.
-    const b64 = data.base64Audio.replace(
-      /^data:audio\/\w+;codecs=[^;]+;base64,|^data:audio\/\w+;base64,/,
-      "",
-    );
-
-    const parts: any[] = [
-      {
-        inlineData: {
-          data: b64,
-          mimeType: "audio/webm",
-        },
-      },
+    const audio = splitBase64(data.base64Audio);
+    const audioType =
+      audio.mimeType && AUDIO_TYPES.includes(audio.mimeType) ? audio.mimeType : "audio/webm";
+    const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [
+      { inlineData: { data: audio.data, mimeType: audioType } },
     ];
-
     if (data.screenshotBase64) {
-      parts.push({
-        inlineData: {
-          data: data.screenshotBase64.replace(/^data:image\/jpeg;base64,/, ""),
-          mimeType: "image/jpeg",
-        },
-      });
+      const shot = splitBase64(data.screenshotBase64);
+      parts.push({ inlineData: { data: shot.data, mimeType: shot.mimeType ?? "image/jpeg" } });
     }
+    parts.push({ text: "Transcribe the spoken audio and identify the speakers." });
 
-    const participantsInfo =
-      data.knownParticipants && data.knownParticipants.length > 0
-        ? `Meeting attendees/participants: ${data.knownParticipants.join(", ")}.`
-        : "";
-
-    const systemPrompt = `You are an expert real-time meeting transcriber and speaker identification engine.
-Transcribe the speech and automatically identify speakers using the audio and the Google Meet screen capture.
-${participantsInfo}
-
-Rules for Automatic Speaker Identification:
-1. Look closely at Google Meet screen elements:
-   - Google Meet live captions (e.g. "Anmol Patel: ...", "You: ...")
-   - Google Meet participant video tile labels (e.g. the name shown in the bottom-left of participant boxes).
-   - If a participant name is visible (e.g. "Anmol Patel"), extract and use their real name as the speaker.
-2. If host is speaking, use "${data.hostName || "Host"}".
-3. If a remote attendee speaks and their name is not yet visible, label as "Remote Participant".
-4. Do NOT invent names from slide text or background presentations.
-
-Return a JSON array of objects:
-[
-  {
-    "speaker": "Participant Name (e.g. Anmol Patel or Remote Participant)",
-    "text": "Exact speech transcribed"
-  }
-]
-If there is no speech or only background silence, return []. Strict JSON only.`;
-
-    const response = await generateWithRetry(ai, {
-      contents: [
-        {
-          role: "user",
-          parts: [...parts, { text: "Transcribe the spoken audio segment and identify speakers." }],
-        },
-      ],
+    const participants = Array.from(new Set([...existingNames, ...(data.knownParticipants ?? [])]));
+    const res = await generateForUser(supabase, userId, "transcribeRemoteAudio", {
+      contents: [{ role: "user", parts }],
       config: {
-        systemInstruction: systemPrompt,
+        systemInstruction: transcribeSystem({ hostName, participants }),
         responseMimeType: "application/json",
+        responseSchema: TRANSCRIBE_SCHEMA,
+        temperature: 0,
       },
     });
 
-    const resultText = (response.text || "").trim();
-    if (!resultText || resultText === "[]" || resultText.length < 5) return null;
+    const parsed = parseAi(
+      z.array(z.object({ speaker: z.string().nullish(), text: z.string().nullish() })),
+      res.text || "[]",
+    );
+    const segments = parsed
+      .map((s) => ({
+        speaker: (s.speaker ?? "").trim().slice(0, 100) || "Remote Participant",
+        content: (s.text ?? "").trim().slice(0, 5000),
+      }))
+      .filter((s) => s.content.length > 1);
+    if (segments.length === 0) return null;
 
-    let parsedArray: any[] = [];
-    try {
-      const parsed = JSON.parse(resultText);
-      if (Array.isArray(parsed)) {
-        parsedArray = parsed;
-      } else if (parsed && typeof parsed === "object") {
-        parsedArray = [parsed];
-      }
-    } catch {
-      // Fallback if not valid JSON
-      parsedArray = [{ speaker: "Remote", text: resultText }];
-    }
-
-    const validSegments: any[] = [];
-
-    for (const segment of parsedArray) {
-      const text = (segment.text || "").trim();
-      let speakerName = segment.speaker || "Remote";
-
-      if (text && text.toLowerCase() !== "audio is silent." && text.length > 1) {
-        validSegments.push({
-          speaker: speakerName,
-          content: text,
-        });
+    // Register newly identified named speakers as participants.
+    const known = new Set(existingNames.map((n) => n.toLowerCase()));
+    const newNames: string[] = [];
+    for (const s of segments) {
+      const key = s.speaker.toLowerCase();
+      if (!known.has(key) && !PLACEHOLDER_SPEAKERS.has(key)) {
+        known.add(key);
+        newNames.push(s.speaker);
       }
     }
-
-    if (validSegments.length > 0) {
-      // Auto-register any new identified remote speakers to the participants table
-      try {
-        const { data: existingParticipants } = await supabase
-          .from("participants")
-          .select("name")
-          .eq("meeting_id", data.meetingId);
-
-        const knownNames = new Set(
-          (existingParticipants || []).map((p: any) => (p.name || "").trim().toLowerCase()),
-        );
-
-        for (const s of validSegments) {
-          const speakerClean = (s.speaker || "").trim();
-          if (speakerClean && !knownNames.has(speakerClean.toLowerCase())) {
-            knownNames.add(speakerClean.toLowerCase());
-            await supabase.from("participants").insert({
-              meeting_id: data.meetingId,
-              name: speakerClean,
-              role: speakerClean.toLowerCase() === "remote" ? "remote" : "participant",
-            });
-          }
-        }
-      } catch (err) {
-        console.warn("Failed to auto-register participants", err);
-      }
-
-      // We return the segments to the frontend.
-      // The frontend will handle merging and batch saving to the DB to optimize writes.
-      return validSegments.map((s) => ({
-        meeting_id: data.meetingId,
-        speaker: s.speaker,
-        content: s.content,
-        segment_index: data.segmentIndex,
-        spoken_at: new Date().toISOString(),
-        status: "partial", // New low-latency status
-      }));
+    if (newNames.length > 0) {
+      const { error } = await supabase.from("participants").insert(
+        newNames.map((name) => ({
+          meeting_id: meeting.id,
+          name,
+          role: name.toLowerCase() === hostName.toLowerCase() ? "host" : "participant",
+        })),
+      );
+      if (error) fail("add participants", error, "Could not save the new participants.");
     }
 
-    return null;
+    const spokenAt = new Date().toISOString();
+    return segments.map((s) => ({
+      meeting_id: meeting.id,
+      speaker: s.speaker,
+      content: s.content,
+      segment_index: data.segmentIndex,
+      spoken_at: spokenAt,
+      status: "partial" as const,
+    }));
   });
+
+// ---------------------------------------------------------------------------
+// cleanAndAlignTranscripts
+// ---------------------------------------------------------------------------
+
+const CleanInput = z.object({
+  meetingId: uuid,
+  rawText: z.string().max(200_000, "Transcript text is too long").optional(),
+});
 
 export const cleanAndAlignTranscripts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((data: { meetingId: string; rawText?: string }) => data)
-  .handler(async ({ context, data }) => {
+  .inputValidator((input: z.input<typeof CleanInput>) => parseInput(CleanInput, input))
+  .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) throw new Error("Missing GEMINI_API_KEY");
+    const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
 
-    // Fetch meeting & participants
-    const { data: meeting } = await supabase
-      .from("meetings")
-      .select("id, title, host_id")
-      .eq("id", data.meetingId)
-      .maybeSingle();
+    const { data: oldSegs, error: segErr } = await supabase
+      .from("transcripts")
+      .select("id, speaker, content, spoken_at")
+      .eq("meeting_id", meeting.id)
+      .order("segment_index", { ascending: true });
+    if (segErr) fail("load transcript", segErr, "Could not load the transcript.");
 
-    if (!meeting) throw new Error("Meeting not found");
+    const raw = data.rawText?.trim() ? data.rawText : transcriptText(oldSegs);
+    if (!raw.trim()) throw new Error("There is no transcript text to clean.");
 
-    const { data: participants } = await supabase
-      .from("participants")
-      .select("name, role")
-      .eq("meeting_id", data.meetingId);
+    const [hostName, participants] = await Promise.all([
+      getHostName(supabase, userId),
+      getParticipantNames(supabase, meeting.id),
+    ]);
 
-    const { data: hostProfile } = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", userId)
-      .maybeSingle();
-
-    const hostName = hostProfile?.full_name?.trim() || "Host (You)";
-    const participantNames = (participants || []).map((p: any) => p.name).filter(Boolean);
-    if (!participantNames.includes(hostName)) participantNames.unshift(hostName);
-
-    let rawInputText = data.rawText || "";
-    if (!rawInputText.trim()) {
-      const { data: existingSegs } = await supabase
-        .from("transcripts")
-        .select("speaker, content, segment_index")
-        .eq("meeting_id", data.meetingId)
-        .order("segment_index", { ascending: true });
-
-      rawInputText = (existingSegs || []).map((s: any) => `${s.speaker}: ${s.content}`).join("\n");
-    }
-
-    if (!rawInputText.trim()) {
-      throw new Error("No transcript text provided to clean.");
-    }
-
-    const ai = new GoogleGenAI({ apiKey: key });
-    const prompt = `You are an expert AI meeting transcription clean-up and diarization assistant.
-
-Meeting Title: ${meeting.title}
-Known Participants: ${participantNames.join(", ")}
-Host/User: ${hostName}
-
-Raw / Noisy Input Transcript:
-${rawInputText}
-
-TASK:
-1. Fix all speech-to-text phonetic mistranslations and typos based on conversation context (e.g., "police dashboard" -> "finish the dashboard", "by Pride" -> "by Friday", "content development" -> "frontend development").
-2. Correctly separate conversation turns and attribute each line to the proper speaker. If speaker 1 is remote/client and speaker 2 is ${hostName}, distinguish their back-and-forth accurately.
-3. Keep the conversation accurate, natural, and clear. Do not invent fictitious topics.
-4. Output STRICT JSON with "cleaned_transcripts" containing an array of objects with { "speaker": string, "content": string }.`;
-
-    const cleanConfig = {
-      model: "gemini-3.7-flash",
-      temperature: 0.1,
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          cleaned_transcripts: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                speaker: { type: Type.STRING },
-                content: { type: Type.STRING },
-              },
-              required: ["speaker", "content"],
+    const res = await generateForUser(supabase, userId, "cleanAndAlignTranscripts", {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: cleanPrompt({ title: meeting.title, hostName, participants, transcript: raw }),
             },
-          },
+          ],
         },
-        required: ["cleaned_transcripts"],
+      ],
+      config: {
+        systemInstruction: CLEAN_SYSTEM,
+        responseMimeType: "application/json",
+        responseSchema: CLEAN_SCHEMA,
+        temperature: 0.1,
       },
-    };
-
-    const response = await generateWithRetry(ai, {
-      contents: [{ text: prompt }],
-      config: cleanConfig,
     });
-
-    const parsed = JSON.parse(response.text || "{}");
-    const cleanedList: Array<{ speaker: string; content: string }> =
-      parsed.cleaned_transcripts || [];
-
-    if (cleanedList.length > 0) {
-      const toInsert = cleanedList.map((item, idx) => ({
-        meeting_id: data.meetingId,
-        speaker: item.speaker,
-        content: item.content,
-        segment_index: idx,
-        spoken_at: new Date(Date.now() - (cleanedList.length - idx) * 15000).toISOString(),
-      }));
-
-      await supabase.from("transcripts").delete().eq("meeting_id", data.meetingId);
-      const { error: insErr } = await supabase.from("transcripts").insert(toInsert);
-      if (insErr) {
-        console.error("Failed to insert cleaned transcripts:", insErr);
-        throw new Error(`Database error saving transcripts: ${insErr.message}`);
-      }
-
-      return { success: true, transcripts: toInsert };
+    const parsed = parseAi(
+      z.object({
+        cleaned_transcripts: z.array(z.object({ speaker: z.string(), content: z.string() })),
+      }),
+      res.text,
+    );
+    const cleaned = parsed.cleaned_transcripts
+      .map((c) => ({ speaker: c.speaker.trim().slice(0, 100), content: c.content.trim() }))
+      .filter((c) => c.speaker && c.content);
+    if (cleaned.length === 0) {
+      throw new Error(
+        "The AI could not produce a cleaned transcript. Your original transcript was kept.",
+      );
     }
 
-    return { success: false, transcripts: [] };
+    // Keep the original timing: map each cleaned line onto the old timeline.
+    const old = oldSegs ?? [];
+    const now = new Date().toISOString();
+    const toInsert = cleaned.map((c, i) => ({
+      meeting_id: meeting.id,
+      speaker: c.speaker,
+      content: c.content,
+      segment_index: i,
+      spoken_at: old.length ? old[Math.floor((i * old.length) / cleaned.length)].spoken_at : now,
+    }));
+
+    // Insert the new transcript first, then remove the old rows by id.
+    const { data: inserted, error: insErr } = await supabase
+      .from("transcripts")
+      .insert(toInsert)
+      .select("*");
+    if (insErr) fail("insert cleaned transcript", insErr, "Could not save the cleaned transcript.");
+
+    if (old.length > 0) {
+      const { error: delErr } = await supabase
+        .from("transcripts")
+        .delete()
+        .in(
+          "id",
+          old.map((s) => s.id),
+        );
+      if (delErr) {
+        await supabase
+          .from("transcripts")
+          .delete()
+          .in(
+            "id",
+            (inserted ?? []).map((s) => s.id),
+          );
+        fail(
+          "replace transcript",
+          delErr,
+          "Could not replace the transcript. Your original was kept.",
+        );
+      }
+    }
+
+    return { success: true as const, transcripts: inserted ?? [] };
   });
+
+// ---------------------------------------------------------------------------
+// Action item CRUD
+// ---------------------------------------------------------------------------
+
+const statusSchema = z.preprocess(
+  (v) => (v === "completed" ? "done" : v),
+  z.enum(["pending", "in_progress", "done"]),
+);
+
+const UpdateStatusInput = z.object({ actionId: uuid, status: statusSchema });
 
 export const updateActionItemStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((data: { actionId: string; status: string }) => data)
-  .handler(async ({ context, data }) => {
-    const { supabase } = context;
-    const { error } = await supabase
+  .inputValidator((input: z.input<typeof UpdateStatusInput>) =>
+    parseInput(UpdateStatusInput, input),
+  )
+  .handler(async ({ data, context }) => {
+    const { data: rows, error } = await context.supabase
       .from("action_items")
       .update({ status: data.status })
-      .eq("id", data.actionId);
-    if (error) {
-      console.warn("updateActionItemStatus error:", error);
+      .eq("id", data.actionId)
+      .select("id");
+    if (error) fail("update task status", error, "Could not update the task.");
+    if (!rows || rows.length === 0) {
+      throw new Error("Task not found, or you are not allowed to change it.");
     }
-    return { success: true };
+    return { success: true as const };
   });
+
+const ActionIdInput = z.object({ actionId: uuid });
 
 export const deleteActionItemServer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((data: { actionId: string }) => data)
-  .handler(async ({ context, data }) => {
-    const { supabase } = context;
-    const { error } = await supabase.from("action_items").delete().eq("id", data.actionId);
-    if (error) {
-      console.warn("deleteActionItemServer error:", error);
+  .inputValidator((input: z.input<typeof ActionIdInput>) => parseInput(ActionIdInput, input))
+  .handler(async ({ data, context }) => {
+    const { data: rows, error } = await context.supabase
+      .from("action_items")
+      .delete()
+      .eq("id", data.actionId)
+      .select("id");
+    if (error) fail("delete task", error, "Could not delete the task.");
+    if (!rows || rows.length === 0) {
+      throw new Error("Task not found, or only the meeting host can delete it.");
     }
-    return { success: true };
+    return { success: true as const };
   });
 
+export type TodoTask = ActionItemRow & { meeting_title: string | null; is_host: boolean };
+
+const NoInput = z.union([z.undefined(), z.null(), z.object({}).strict()]);
+
+/** Tasks from the caller's own meetings plus tasks assigned to the caller. */
 export const fetchUserTodoTasks = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((input?: z.input<typeof NoInput>) => parseInput(NoInput, input))
+  .handler(async ({ context }): Promise<TodoTask[]> => {
     const { supabase, userId } = context;
 
-    const { data: prof } = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", userId)
-      .maybeSingle();
-    const userFullName = (prof?.full_name || "").trim();
+    const { data: meetings, error: mErr } = await supabase
+      .from("meetings")
+      .select("id, title")
+      .eq("host_id", userId);
+    if (mErr) fail("load meetings", mErr, "Could not load your meetings.");
+    const titles = new Map((meetings ?? []).map((m) => [m.id, m.title]));
+    const ids = Array.from(titles.keys());
 
-    const { data: allTasks } = await supabase
-      .from("action_items")
-      .select("*")
-      .order("created_at", { ascending: false });
+    const [own, assigned] = await Promise.all([
+      ids.length
+        ? supabase.from("action_items").select("*").in("meeting_id", ids)
+        : Promise.resolve({ data: [] as ActionItemRow[], error: null }),
+      supabase.from("action_items").select("*").eq("assignee_user_id", userId),
+    ]);
+    if (own.error) fail("load tasks", own.error, "Could not load your tasks.");
+    if (assigned.error) fail("load assigned tasks", assigned.error, "Could not load your tasks.");
 
-    return (allTasks || []) as Array<{
-      id: string;
-      meeting_id: string | null;
-      title: string;
-      assignee: string | null;
-      deadline: string | null;
-      status: string;
-      created_at: string;
-    }>;
+    const byId = new Map<string, TodoTask>();
+    for (const t of [...(own.data ?? []), ...(assigned.data ?? [])]) {
+      byId.set(t.id, {
+        ...t,
+        meeting_title: titles.get(t.meeting_id) ?? null,
+        is_host: titles.has(t.meeting_id),
+      });
+    }
+    return Array.from(byId.values()).sort((a, b) => b.created_at.localeCompare(a.created_at));
   });
+
+const CreateActionInput = z.object({
+  /** Ignored: the database generates the id. */
+  id: z.string().max(100).optional(),
+  title: str(500).min(1, "Title is required"),
+  assignee: str(200).nullish(),
+  meetingId: uuid,
+  deadline: str(64).nullish(),
+  status: statusSchema.optional(),
+});
+
 export const createActionItemServer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator(
-    (data: {
-      id?: string;
-      title: string;
-      assignee?: string | null;
-      meetingId: string;
-      deadline?: string | null;
-      status: string;
-    }) => data,
+  .inputValidator((input: z.input<typeof CreateActionInput>) =>
+    parseInput(CreateActionInput, input),
   )
-  .handler(async ({ context, data }) => {
-    const { supabase } = context;
-    const taskId = data.id || crypto.randomUUID();
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    await requireOwnedMeeting(supabase, userId, data.meetingId);
 
-    try {
-      const { data: ins, error } = await supabase
-        .from("action_items")
-        .insert({
-          id: taskId,
-          title: data.title,
-          assignee: data.assignee || null,
-          meeting_id: data.meetingId,
-          deadline: data.deadline || null,
-          status: data.status || "pending",
-        })
-        .select()
-        .maybeSingle();
-
-      if (!error && ins) {
-        return { success: true, task: ins };
-      }
-      if (error) {
-        console.warn("createActionItemServer warning:", error);
-      }
-    } catch (e) {
-      console.warn("createActionItemServer DB insert exception:", e);
+    let deadline: string | null = null;
+    if (data.deadline) {
+      deadline = resolveDeadlineToISODate(data.deadline, new Date());
+      if (!deadline) throw new Error("The deadline is not a valid date.");
     }
 
-    return {
-      success: true,
-      task: {
-        id: taskId,
+    const { data: task, error } = await supabase
+      .from("action_items")
+      .insert({
+        meeting_id: data.meetingId,
         title: data.title,
         assignee: data.assignee || null,
-        meeting_id: data.meetingId,
-        deadline: data.deadline || null,
-        status: data.status || "pending",
-        created_at: new Date().toISOString(),
-      },
-    };
+        deadline,
+        status: data.status ?? "pending",
+      })
+      .select("*")
+      .single();
+    if (error) fail("create task", error, "Could not create the task.");
+    return { success: true as const, task };
   });
