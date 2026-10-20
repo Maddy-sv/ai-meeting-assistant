@@ -254,7 +254,7 @@ const COMPLETION_RE =
   /\b(completed?|finished|done|shipped|delivered|wrapped up|closed|resolved|implemented|deployed|merged)\b/i;
 
 const NEGATION_RE =
-  /(\b(not|never|yet to|still|pending|in progress|remain\w*|left|outstanding|incomplete|will|shall|going to|plan to|planning to|should|need to|needs to|once|after|when|until|before|let's|lets)\b|n't\b|'ll\b)/i;
+  /(\b(not|never|yet to|still|pending|in progress|remain\w*|left|outstanding|incomplete|will|shall|going to|plan to|planning to|should|need to|needs to|once|after|when|until|before|let's|lets|partly|partially|half|halfway|mostly|nearly|almost)\b|n't\b|'ll\b)/i;
 
 function splitSentences(text: string): string[] {
   return (text || "")
@@ -291,6 +291,98 @@ export function confirmsCompletion(
   );
 }
 
+const PROGRESS_RE =
+  /\b(working on|worked on|work on it|started|starting on|begun|began|kicked off|in progress|underway|under way|halfway|half way|half done|partly done|partially done|partially|part of it|mostly done|nearly done|almost done|almost finished|making progress|made progress|progressing|first draft|drafted|in review|being reviewed)\b/i;
+
+const PROGRESS_NEGATION_RE =
+  /(\b(not|never|no one|nobody|yet to|haven't|hasn't|didn't|won't|will|shall|going to|plan to|planning to|should|need to|needs to|could you|can you|would you|let's|lets)\b|n't\b|'ll\b|\?\s*$)/i;
+
+export function mentionsProgress(text: string, taskTitle: string, ignore: string[] = []): boolean {
+  const subject = taskSubjectWords(taskTitle, ignore);
+  return splitSentences(text).some(
+    (s) => PROGRESS_RE.test(s) && !PROGRESS_NEGATION_RE.test(s) && mentionsTask(s, subject),
+  );
+}
+
+const STATUS_RANK: Record<TaskStatus, number> = { pending: 0, in_progress: 1, done: 2 };
+
+export function mergeTaskStatus(
+  prior: string | null | undefined,
+  incoming: string | null | undefined,
+): TaskStatus {
+  const a = normalizeStatus(prior ?? "");
+  const b = normalizeStatus(incoming ?? "");
+  return STATUS_RANK[b] > STATUS_RANK[a] ? b : a;
+}
+
+export function statusFromRecords(
+  text: string,
+  taskTitle: string,
+  ignore: string[] = [],
+): TaskStatus {
+  if (confirmsCompletion(text, taskTitle, ignore)) return "done";
+  if (mentionsProgress(text, taskTitle, ignore)) return "in_progress";
+  return "pending";
+}
+
+export function evidenceSupported(evidence: string, recordsText: string): boolean {
+  const words = Array.from(new Set(significantWords(evidence)));
+  if (words.length === 0) return false;
+  const available = new Set(significantWords(recordsText));
+  const hits = words.filter((w) => available.has(w)).length;
+  return hits / words.length >= 0.6;
+}
+
+export interface ProgressMeeting {
+  id: string;
+  date: string;
+  text: string;
+}
+
+export interface ProgressTask {
+  id: string;
+  meeting_id: string;
+  title: string;
+  status: string;
+  canonical_key?: string | null;
+}
+
+export function planTaskProgressUpdates(
+  meetings: ProgressMeeting[],
+  tasks: ProgressTask[],
+  ignore: string[] = [],
+): Array<{ id: string; status: TaskStatus }> {
+  const order = [...meetings].sort((a, b) => a.date.localeCompare(b.date));
+  const position = new Map(order.map((m, i) => [m.id, i]));
+  const best = new Map<string, Array<{ index: number; status: TaskStatus }>>();
+  for (const t of tasks) {
+    const index = position.get(t.meeting_id);
+    if (index === undefined) continue;
+    const key = (t.canonical_key || "").trim() || canonicalTaskKey(t.title, ignore);
+    const list = best.get(key) ?? [];
+    list.push({ index, status: normalizeStatus(t.status) });
+    best.set(key, list);
+  }
+
+  const updates: Array<{ id: string; status: TaskStatus }> = [];
+  for (const t of tasks) {
+    const index = position.get(t.meeting_id);
+    if (index === undefined) continue;
+    const current = normalizeStatus(t.status);
+    if (current === "done") continue;
+    const key = (t.canonical_key || "").trim() || canonicalTaskKey(t.title, ignore);
+    let next = current;
+    for (const other of best.get(key) ?? []) {
+      if (other.index > index) next = mergeTaskStatus(next, other.status);
+    }
+    for (let i = index + 1; i < order.length && next !== "done"; i++) {
+      next = mergeTaskStatus(next, statusFromRecords(order[i].text, t.title, ignore));
+    }
+    if (next !== current) updates.push({ id: t.id, status: next });
+  }
+  return updates;
+}
+
 export function deadlineMentionedFor(
   text: string,
   taskTitle: string,
@@ -310,7 +402,7 @@ export function deadlineMentionedFor(
   return null;
 }
 
-function normalizeStatus(raw: string): TaskStatus {
+export function normalizeStatus(raw: string): TaskStatus {
   const s = (raw || "").toLowerCase().trim();
   if (s === "done" || s === "completed" || s === "complete") return "done";
   if (s === "in_progress" || s === "in-progress" || s === "in progress") return "in_progress";
