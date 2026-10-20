@@ -772,3 +772,81 @@ The paper's scenario then lives as a **reproducible demo seed** (`supabase/seed/
 - **Recommended access path** (no prod credentials needed for most work):
   1. Local Supabase via Docker (installed) plus the Supabase CLI (D8), so migrations and RLS tests run locally.
   2. For the live project, apply reviewed migrations through Lovable, or through a Supabase connector/CLI login that you perform yourself against the org that owns `aasrwv…`. Never paste tokens into chat or into files.
+
+---
+
+## 16. Implementation status (2026-10-20)
+
+Branch `revamp/production-readiness` (local, not pushed). Your earlier work is preserved on `wip/continuous-memory-snapshot`, tagged `paper-eval-2026-10`.
+
+### Verified locally
+| Check | Before | After |
+|---|---|---|
+| `npm run typecheck` | 65 errors | **0** |
+| `npm run lint` | 2,402 problems | **0** (`--max-warnings 0`) |
+| `npm test` | 12 pass | **18 pass** |
+| `npm run build` | pass, 557 kB main chunk | **pass**, 453 kB main chunk |
+| `npm audit --omit=dev` | 12 vulns (6 critical) | **0** |
+| SQL / RLS tests (pglite) | none | **22/22 pass** (not committed) |
+| Fabricated data grep | ~109 hits | **0** in product code |
+| Raw colour / hex grep | hundreds | **0** outside `components/ui` |
+| `aria-label`s | 0 | 50 |
+| Dev server route smoke test | — | every route responds; unknown route 404 |
+
+### Done, by phase
+- **Phase 0:** untracked `.env` and `supabase/.temp`, added `.env.example`, removed scratch scripts and boilerplate function, formatting commit.
+- **Phase 1 / 1B:**
+  - JWT verification in server functions;
+  - `is_admin()`, admin guard and read-only admin policies;
+  - fixed action-item RLS (`assignee_user_id`);
+  - protected profile fields;
+  - disabled accounts are read-only;
+  - zod validation, ownership checks and AI daily limits on every server function;
+  - hardened edge functions;
+  - auth rebuilt: Google sign-in restored, email confirmation, password rules, recovery-only reset, redirect back, sign-out clears data;
+  - dependency CVEs fixed.
+- **Phase 2:**
+  - all fabricated transcripts, participants, tasks, summaries and names removed;
+  - DB-generated task IDs with canonical keys;
+  - upserts instead of delete-then-insert;
+  - errors surface to the UI;
+  - schema-synced types;
+  - Continuous Meeting Memory kept, now generic;
+  - paper scenario moved into `seed_demo_workspace()`.
+- **Phase 3:**
+  - real dashboard and admin data;
+  - notifications bell;
+  - search page;
+  - pre-meeting briefing;
+  - saved chat history;
+  - Google Calendar import with reconnect;
+  - confirmation and reminder emails;
+  - working profile and connected accounts;
+  - landing links fixed.
+- **Phase 4:**
+  - meeting page split from 3,777 lines into hooks and components;
+  - to-do board split;
+  - AI server code split into `src/server/*`;
+  - mock data removed.
+- **Phase 5:**
+  - design tokens and layout primitives;
+  - every page migrated;
+  - mobile layouts for calendar, tasks and navigation;
+  - keyboard and screen-reader fixes.
+
+### Still requires you (cannot be done from this machine)
+1. Revoke the leaked Gemini key and the pasted Supabase token.
+2. Apply `supabase/migrations/20261020120000_revamp_core.sql` then `20261020130000_meeting_status.sql` to the live project (`aasrwv…`), via Lovable or the SQL editor (see `docs/BACKEND.md`). The app's new features need them.
+3. Make yourself admin with the SQL snippet in `docs/BACKEND.md`.
+4. Supabase Auth settings:
+   - redirect URLs `/auth` and `/reset-password`;
+   - minimum password length 8;
+   - leaked-password protection;
+   - manual identity linking (for Connect Google);
+   - Google provider with the `calendar.readonly` scope.
+5. Edge secrets: `RESEND_API_KEY`, `EMAIL_FROM`, `ALLOWED_ORIGINS`, `REMINDERS_CRON_SECRET`. Deploy both edge functions, and run `supabase/sql/schedule_reminders.sql` for automatic reminders.
+6. Check that the Gemini model names work with your key, or set `GEMINI_MODEL`.
+
+### Not yet done
+- Browser click-through with a signed-in account. This needs the migrations applied to the live database first; use the QA checklists from the agent reports, summarised in the final hand-off.
+- Automated component and E2E tests, CI workflow, security headers and error tracking (Phases 6–7). These are optional for a college submission.
