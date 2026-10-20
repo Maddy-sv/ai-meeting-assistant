@@ -181,10 +181,21 @@ END;
 $$;
 REVOKE EXECUTE ON FUNCTION public.handle_user_email_change() FROM PUBLIC, anon, authenticated;
 
-DROP TRIGGER IF EXISTS on_auth_user_email_changed ON auth.users;
-CREATE TRIGGER on_auth_user_email_changed
-AFTER UPDATE OF email ON auth.users
-FOR EACH ROW EXECUTE FUNCTION public.handle_user_email_change();
+-- Create the trigger only if it is missing: on hosted Supabase the migration
+-- role may not own auth.users, so a DROP TRIGGER there would fail on re-runs.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'on_auth_user_email_changed'
+      AND tgrelid = 'auth.users'::regclass
+  ) THEN
+    CREATE TRIGGER on_auth_user_email_changed
+    AFTER UPDATE OF email ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.handle_user_email_change();
+  END IF;
+END;
+$$;
 
 -- Backfill: profiles for users created before the trigger existed, then emails.
 INSERT INTO public.profiles (id, full_name, email)

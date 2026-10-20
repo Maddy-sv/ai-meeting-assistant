@@ -483,7 +483,9 @@ export type Database = {
         };
         Returns: boolean;
       };
+      is_active_user: { Args: never; Returns: boolean };
       is_admin: { Args: never; Returns: boolean };
+      my_open_task_count: { Args: never; Returns: number };
       search_workspace: {
         Args: { q: string };
         Returns: {
