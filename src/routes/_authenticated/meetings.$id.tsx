@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ActionItemsCard } from "@/components/meeting/ActionItemsCard";
+import { BriefingPanel } from "@/components/meeting/BriefingPanel";
 import { DecisionsCard } from "@/components/meeting/DecisionsCard";
 import { EmailComposerDialog } from "@/components/meeting/EmailComposerDialog";
 import { EmailTab } from "@/components/meeting/EmailTab";
@@ -108,6 +109,8 @@ function MeetingDetail() {
   }
 
   const completed = meeting.status === "completed";
+  // Before the meeting starts the briefing is shown up front; afterwards it is a tab.
+  const upcoming = !completed && meeting.status !== "in_progress" && !recording.live;
   const activeTab = tab ?? (completed ? "summary" : "transcript");
   const hasTranscript = transcripts.length > 0;
 
@@ -128,6 +131,7 @@ function MeetingDetail() {
         onSaveLink={edits.saveMeetingLink}
       />
       <LiveStatusBar recording={recording} meetingCompleted={completed} />
+      {upcoming && <BriefingPanel meetingId={meeting.id} />}
 
       <Tabs value={activeTab} onValueChange={setTab}>
         <TabsList className="h-auto flex-wrap">
@@ -135,6 +139,7 @@ function MeetingDetail() {
           {completed && <TabsTrigger value="actions">Actions & decisions</TabsTrigger>}
           {completed && <TabsTrigger value="email">Email & recaps</TabsTrigger>}
           <TabsTrigger value="transcript">Transcript</TabsTrigger>
+          {!upcoming && <TabsTrigger value="briefing">Briefing</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="transcript">
@@ -151,6 +156,12 @@ function MeetingDetail() {
             <ParticipantsPanel participants={participants} hostName={hostName} edits={edits} />
           </div>
         </TabsContent>
+
+        {!upcoming && (
+          <TabsContent value="briefing">
+            <BriefingPanel meetingId={meeting.id} />
+          </TabsContent>
+        )}
 
         <TabsContent value="summary">
           <SummaryTab
