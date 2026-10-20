@@ -19,7 +19,7 @@ import { askChat, clearChatMessages, dataKeys, listChatMessages } from "@/lib/rp
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/chat")({
-  head: () => ({ meta: [{ title: "Ask your meetings — AI Powered Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "AI Chat Bot — AI Powered Meeting Companion" }] }),
   component: ChatPage,
 });
 

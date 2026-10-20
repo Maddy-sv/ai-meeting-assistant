@@ -74,7 +74,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "AI Meeting Companion — AI Workspace for Meeting Intelligence" },
+      { title: "AI Powered Meeting Companion — AI Workspace for Meeting Intelligence" },
       {
         name: "description",
         content:

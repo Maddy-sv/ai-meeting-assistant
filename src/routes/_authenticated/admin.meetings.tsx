@@ -32,7 +32,7 @@ import {
 import { adminListMeetings } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/admin/meetings")({
-  head: () => ({ meta: [{ title: "Meetings — Admin — AI Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "Meetings — Admin — AI Powered Meeting Companion" }] }),
   component: AdminMeetings,
 });
 

@@ -167,7 +167,7 @@ function Landing() {
               <Sparkles className="h-5 w-5 text-primary-foreground" />
             </div>
             <span className="truncate text-base font-bold tracking-tight sm:text-lg">
-              AI Meeting Companion
+              AI Powered Meeting Companion
             </span>
           </Link>
           <nav className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
@@ -211,7 +211,8 @@ function Landing() {
       <section className="relative mx-auto max-w-7xl px-4 pb-20 pt-16 lg:px-8 lg:pt-28">
         <div className="mx-auto max-w-4xl text-center">
           <div className="glass mx-auto mb-6 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs">
-            <Sparkles className="h-3.5 w-3.5" /> Your AI meeting assistant
+            <Sparkles className="h-3.5 w-3.5" /> Introducing AI Powered Meeting Companion AI
+            Assistant
           </div>
           <h1 className="text-4xl font-black tracking-tight sm:text-6xl lg:text-7xl">
             <span className="gradient-text">AI Powered Meeting Companion</span> — The Complete AI
@@ -435,7 +436,7 @@ function Landing() {
               <span className="font-bold">AI Powered Meeting Companion</span>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              © {new Date().getFullYear()} AI Powered Meeting Companion.
+              © {new Date().getFullYear()} AI Powered Meeting Companion. All rights reserved.
             </p>
           </div>
           <nav

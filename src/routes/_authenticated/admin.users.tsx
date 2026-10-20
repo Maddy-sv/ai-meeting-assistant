@@ -26,7 +26,7 @@ import { useUser } from "@/lib/auth";
 import { adminListUsers, adminSetUserActive, adminSetUserRole, type AdminUser } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/admin/users")({
-  head: () => ({ meta: [{ title: "Users — Admin — AI Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "Users — Admin — AI Powered Meeting Companion" }] }),
   component: AdminUsers,
 });
 

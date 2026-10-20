@@ -25,7 +25,7 @@ import {
 import { adminListMeetings, adminListUsers, adminOverview } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/admin/dashboard")({
-  head: () => ({ meta: [{ title: "Admin overview — AI Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "Admin Control Center — AI Powered Meeting Companion" }] }),
   component: AdminDashboard,
 });
 

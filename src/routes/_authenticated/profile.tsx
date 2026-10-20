@@ -33,7 +33,7 @@ import { authKeys, useProfile, useUser } from "@/lib/auth";
 import { type ProfileRow } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/profile")({
-  head: () => ({ meta: [{ title: "Profile — AI Powered Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "Profile & Settings — AI Powered Meeting Companion" }] }),
   component: ProfilePage,
 });
 

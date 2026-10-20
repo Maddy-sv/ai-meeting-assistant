@@ -11,7 +11,7 @@ import { TaskFilters, type TaskScope } from "@/components/todo/TaskFilters";
 import { useTodoTasks } from "@/hooks/use-todo-tasks";
 
 export const Route = createFileRoute("/_authenticated/todo")({
-  head: () => ({ meta: [{ title: "Tasks & Action Items — AI Powered Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "To-Do List & Action Items — AI Powered Meeting Companion" }] }),
   component: TodoPage,
 });
 

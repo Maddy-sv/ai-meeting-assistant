@@ -32,7 +32,7 @@ import { dataKeys, listMyMeetings, listProjects, type MeetingListRow } from "@/l
 import { normalizeMeetingStatus } from "@/components/layout/status";
 
 export const Route = createFileRoute("/_authenticated/meetings/")({
-  head: () => ({ meta: [{ title: "Meetings — AI Powered Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "My Meetings — AI Powered Meeting Companion" }] }),
   component: MeetingsList,
 });
 

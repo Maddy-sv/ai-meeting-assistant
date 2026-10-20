@@ -37,10 +37,10 @@ export const Route = createFileRoute("/auth")({
   }),
   head: () => ({
     meta: [
-      { title: "Sign in — AI Meeting Companion" },
+      { title: "Sign in — AI Powered Meeting Companion" },
       {
         name: "description",
-        content: "Sign in to AI Meeting Companion and let AI handle your meeting notes.",
+        content: "Sign in to AI Powered Meeting Companion and let AI handle your meeting notes.",
       },
     ],
   }),
@@ -106,8 +106,11 @@ function AuthPage() {
   }
 
   const heading: Record<Mode, { title: string; subtitle: string }> = {
-    signin: { title: "Welcome back", subtitle: "Sign in to your meeting workspace" },
-    signup: { title: "Create your account", subtitle: "Start capturing every meeting" },
+    signin: {
+      title: "Welcome back",
+      subtitle: "Sign in to your AI Powered Meeting Companion workspace",
+    },
+    signup: { title: "Create your account", subtitle: "Start automating your meetings" },
     forgot: { title: "Reset your password", subtitle: "We'll email you a secure reset link" },
     "check-email": { title: "Check your email", subtitle: "One more step to finish" },
   };
@@ -119,7 +122,7 @@ function AuthPage() {
           <div className="gradient-bg grid h-10 w-10 place-items-center rounded-xl shadow-glow">
             <Sparkles className="h-5 w-5 text-primary-foreground" />
           </div>
-          <span className="text-xl font-bold tracking-tight">AI Meeting Companion</span>
+          <span className="text-xl font-bold tracking-tight">AI Powered Meeting Companion</span>
         </Link>
 
         <div className="glass rounded-3xl p-6 shadow-soft sm:p-8">

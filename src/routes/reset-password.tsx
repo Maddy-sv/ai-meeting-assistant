@@ -20,7 +20,7 @@ import { clearRecoverySession, hasRecoverySession } from "@/lib/auth";
 
 export const Route = createFileRoute("/reset-password")({
   ssr: false,
-  head: () => ({ meta: [{ title: "Reset password — AI Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "Reset password — AI Powered Meeting Companion" }] }),
   component: ResetPassword,
 });
 
@@ -106,7 +106,7 @@ function ResetPassword() {
           <div className="gradient-bg grid h-10 w-10 place-items-center rounded-xl shadow-glow">
             <Sparkles className="h-5 w-5 text-primary-foreground" />
           </div>
-          <span className="text-xl font-bold tracking-tight">AI Meeting Companion</span>
+          <span className="text-xl font-bold tracking-tight">AI Powered Meeting Companion</span>
         </Link>
 
         {status === "checking" && (

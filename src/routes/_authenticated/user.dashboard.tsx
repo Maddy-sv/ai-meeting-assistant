@@ -31,7 +31,7 @@ import { useDisplayName, useUser } from "@/lib/auth";
 import { normalizeMeetingStatus } from "@/components/layout/status";
 
 export const Route = createFileRoute("/_authenticated/user/dashboard")({
-  head: () => ({ meta: [{ title: "My workspace — AI Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "Dashboard — AI Powered Meeting Companion" }] }),
   component: UserDashboard,
 });
 
