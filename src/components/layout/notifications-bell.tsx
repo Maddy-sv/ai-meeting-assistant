@@ -18,7 +18,6 @@ import {
   useUnreadNotificationCount,
 } from "./notifications";
 
-/** Header bell: unread badge, latest 20 notifications, realtime updates and mark-as-read. */
 export function NotificationsBell() {
   const user = useUser();
   const userId = user?.id ?? "";
@@ -30,7 +29,6 @@ export function NotificationsBell() {
   const unread = useUnreadNotificationCount();
   const unreadCount = unread.data ?? 0;
 
-  // Live updates for this user's notifications.
   useEffect(() => {
     if (!userId) return;
     const channel = supabase

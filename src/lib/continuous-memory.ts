@@ -1,20 +1,3 @@
-/**
- * Continuous Meeting Memory (CMM)
- *
- * Deterministic, data-agnostic helpers that track tasks across a series of
- * meetings:
- * 1. Persisted meeting records and action items are the source of truth.
- * 2. Tasks are matched across meetings by a canonical key (stored in
- *    action_items.canonical_key, or derived from the title).
- * 3. A later meeting that confirms completion marks the reconciled task done,
- *    while each meeting's own records stay untouched.
- * 4. Pending tasks stay pending until a record or discussion confirms them.
- * 5. Decisions are deduplicated by normalised text; distinct ones are kept.
- * 6. Cumulative summaries contain only facts from the records.
- * 7. Conflicting deadlines/assignees are flagged with evidence, never
- *    silently overwritten.
- */
-
 export type TaskStatus = "pending" | "in_progress" | "done";
 
 export interface ActionItemRecord {
@@ -47,7 +30,6 @@ export interface ConflictRecord {
 }
 
 export interface ReconciledTask {
-  /** id of the most recent action_items row for this task (or the key if none) */
   id: string;
   canonical_key: string;
   title: string;
@@ -88,10 +70,6 @@ export interface CumulativeSummaryResult {
   conflicts: ConflictRecord[];
 }
 
-// ---------------------------------------------------------------------------
-// Canonical task keys
-// ---------------------------------------------------------------------------
-
 const STOPWORDS = new Set([
   "a",
   "an",
@@ -126,7 +104,6 @@ const STOPWORDS = new Set([
   "up",
 ]);
 
-/** Very small suffix stripper so "share"/"shared"/"sharing" compare equal. */
 function stem(word: string): string {
   let w = word;
   if (w.length > 5 && w.endsWith("ing")) w = w.slice(0, -3);
@@ -137,7 +114,6 @@ function stem(word: string): string {
   return w;
 }
 
-/** Significant, stemmed words of a text (used for keys and matching). */
 export function significantWords(text: string, ignore: string[] = []): string[] {
   const ignored = new Set(
     ignore
@@ -153,12 +129,6 @@ export function significantWords(text: string, ignore: string[] = []): string[] 
     .filter((w) => !ignored.has(w));
 }
 
-/**
- * Derives a stable canonical key for a task title, e.g.
- * "Finalize the project dashboard" -> "task:finalize-project-dashboard".
- * Words in `ignore` (typically participant names) are left out so the same
- * task assigned to differently-named people still matches.
- */
 export function canonicalTaskKey(title: string, ignore: string[] = []): string {
   const words = significantWords(title, ignore);
   const slug = words.join("-").slice(0, 64).replace(/-+$/, "");
@@ -169,10 +139,6 @@ function keyOf(a: ActionItemRecord, ignore: string[] = []): string {
   const stored = (a.canonical_key || "").trim();
   return stored || canonicalTaskKey(a.title, ignore);
 }
-
-// ---------------------------------------------------------------------------
-// Deadlines
-// ---------------------------------------------------------------------------
 
 const WEEKDAYS: Record<string, number> = {
   sunday: 0,
@@ -187,11 +153,6 @@ const WEEKDAYS: Record<string, number> = {
 const WEEKDAY_RE =
   /\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(\s+(morning|afternoon|evening|night))?\b/i;
 
-/**
- * Resolves a deadline ("Wednesday", "Tuesday evening", "2026-11-05", an ISO
- * timestamp) to a Date. Weekdays resolve to their next occurrence on or after
- * `referenceDate`. Returns null when the value cannot be understood.
- */
 export function resolveDeadlineToDate(
   val?: string | null,
   referenceDate?: string | Date | null,
@@ -228,7 +189,6 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** Converts a deadline to a local calendar date string YYYY-MM-DD, or null. */
 export function resolveDeadlineToISODate(
   val?: string | null,
   referenceDate?: string | Date | null,
@@ -238,7 +198,6 @@ export function resolveDeadlineToISODate(
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** Human-readable deadline, e.g. "21 Oct 2026". */
 export function safeFormatDeadline(
   val?: string | null,
   referenceDate?: string | Date | null,
@@ -254,10 +213,6 @@ export function safeFormatDeadline(
   return String(val);
 }
 
-// ---------------------------------------------------------------------------
-// Decisions
-// ---------------------------------------------------------------------------
-
 export function normalizeDecisionText(text: string): string {
   if (!text) return "";
   return text
@@ -267,7 +222,6 @@ export function normalizeDecisionText(text: string): string {
     .trim();
 }
 
-/** Removes decisions with identical normalised text; keeps distinct ones. */
 export function deduplicateDecisions<T extends DecisionRecord>(decisions: T[]): T[] {
   const seen = new Map<string, T>();
   for (const d of decisions) {
@@ -283,34 +237,236 @@ export function deduplicateDecisions<T extends DecisionRecord>(decisions: T[]): 
   return Array.from(seen.values());
 }
 
-// ---------------------------------------------------------------------------
-// Assignees
-// ---------------------------------------------------------------------------
-
 const PLACEHOLDER_ASSIGNEE =
   /^(remote( participant)?|participant( \d+)?|speaker( \d+)?|unknown|unassigned|someone|tbd|n\/a)$/i;
 
-/** True for generic speaker labels such as "Remote Participant" or "Speaker 2". */
 export function isPlaceholderAssignee(name?: string | null): boolean {
   const n = (name || "").trim();
   return !n || PLACEHOLDER_ASSIGNEE.test(n);
 }
 
-/** Trims an assignee; empty values become null. */
 export function normalizeAssignee(raw?: string | null): string | null {
   const clean = (raw || "").replace(/\s+/g, " ").trim();
   return clean || null;
 }
 
-// ---------------------------------------------------------------------------
-// Completion detection
-// ---------------------------------------------------------------------------
+const NO_ASSIGNEE =
+  /^(unknown|unassigned|someone|somebody|anyone|tbd|tbc|n\/a|none|null|nobody|no one)$/i;
+
+const SELF_ASSIGNEE =
+  /^(you|host|me|i|myself|organiser|organizer|the host|the organiser|the organizer)$/i;
+
+const REMOTE_LABEL =
+  /^(remote( participant| speaker| user)?|participant( \d+)?|speaker( \d+)?|guest( \d+)?|other participant|the other participant|attendee( \d+)?)$/i;
+
+export function resolveTaskAssignee(
+  raw: string | null | undefined,
+  hostName: string,
+  participants: string[] = [],
+): string | null {
+  const clean = normalizeAssignee(raw);
+  if (!clean || NO_ASSIGNEE.test(clean)) return null;
+  const host = hostName.trim().toLowerCase();
+  const others = Array.from(
+    new Set(
+      participants
+        .map((p) => normalizeAssignee(p))
+        .filter(
+          (p): p is string =>
+            !!p && p.toLowerCase() !== host && !REMOTE_LABEL.test(p) && !NO_ASSIGNEE.test(p),
+        ),
+    ),
+  );
+  const names = clean
+    .split(/\s*(?:,|&|\band\b|\bwith\b)\s*/i)
+    .map((part) => part.trim())
+    .filter((part) => part && !NO_ASSIGNEE.test(part))
+    .map((part) => {
+      if (SELF_ASSIGNEE.test(part)) return hostName;
+      if (REMOTE_LABEL.test(part) && others.length === 1) return others[0];
+      return part;
+    });
+  const unique = names.filter(
+    (n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i,
+  );
+  if (unique.length === 0) return null;
+  return unique.join(" and ").slice(0, 200);
+}
 
 const COMPLETION_RE =
-  /\b(completed?|finished|done|shipped|delivered|wrapped up|closed|resolved|implemented|deployed|merged)\b/i;
-// Sentences that negate, defer or make completion conditional are ignored.
+  /\b(completed?|finished|done|shipped|delivered|wrapped up|closed|resolved|implemented|deployed|merged|tested|fixed|finali[sz]ed|submitted|sent|shared|published|launched|released|uploaded)\b/i;
+
 const NEGATION_RE =
-  /(\b(not|never|yet to|still|pending|in progress|remain\w*|left|outstanding|incomplete|will|shall|going to|plan to|planning to|should|need to|needs to|once|after|when|until|before|let's|lets)\b|n't\b|'ll\b)/i;
+  /(\b(not|never|yet to|still|pending|in progress|remain\w*|left|outstanding|incomplete|will|shall|going to|plan to|planning to|should|need to|needs to|once|after|when|until|before|let's|lets|partly|partially|half|halfway|mostly|nearly|almost|please|must|have to|has to|can you|could you|would you)\b|n't\b|'ll\b)/i;
+
+const REMAINING_RE =
+  /\b(still needs?|still (has|have) to|still to|still pending|one more|another (round|test|pass|check)|remaining|remains|left to|yet to|not yet|outstanding|incomplete|rest of)\b/i;
+
+const PROGRESS_RE =
+  /\b(working on|worked on|work on it|started|starting on|begun|began|kicked off|in progress|underway|under way|halfway|half way|half done|partly done|partially done|partially|part of it|mostly done|nearly done|almost done|almost finished|making progress|made progress|progressing|first draft|drafted|in review|being reviewed)\b/i;
+
+const PROGRESS_NEGATION_RE =
+  /(\b(not|never|no one|nobody|yet to|haven't|hasn't|didn't|won't|will|shall|going to|plan to|planning to|should|need to|needs to|could you|can you|would you|let's|lets)\b|n't\b|'ll\b|\?\s*$)/i;
+
+const MATCH_PHRASES: Array<[RegExp, string]> = [
+  [/\buser interfaces?\b/g, " ui "],
+  [/\buser experiences?\b/g, " ux "],
+  [/\bfront[\s-]?ends?\b/g, " frontend "],
+  [/\bback[\s-]?ends?\b/g, " backend "],
+  [/\bquality assurance\b/g, " qa "],
+  [/\bpull requests?\b/g, " pr "],
+  [/\be-mails?\b/g, " email "],
+];
+
+const MATCH_SYNONYMS: Record<string, string> = {
+  docs: "doc",
+  documentation: "doc",
+  documents: "doc",
+  document: "doc",
+  database: "db",
+  databases: "db",
+  repository: "repo",
+  repositories: "repo",
+  specification: "spec",
+  specifications: "spec",
+  specs: "spec",
+  configuration: "config",
+  environment: "env",
+  environments: "env",
+  application: "app",
+  applications: "app",
+  apps: "app",
+  information: "info",
+  authentication: "auth",
+  login: "auth",
+  mail: "email",
+  mails: "email",
+  emails: "email",
+  fixes: "fix",
+  fixed: "fix",
+  fixing: "fix",
+  resolve: "fix",
+  resolves: "fix",
+  resolved: "fix",
+  resolving: "fix",
+  solve: "fix",
+  solved: "fix",
+  development: "dev",
+  develop: "dev",
+  developing: "dev",
+  developed: "dev",
+  finalise: "finalize",
+  finalised: "finalize",
+  finalising: "finalize",
+  prioritise: "prioritize",
+  organise: "organize",
+  optimise: "optimize",
+  customise: "customize",
+  analyse: "analyze",
+};
+
+const MATCH_STOPWORDS = new Set([
+  ...STOPWORDS,
+  "i",
+  "we",
+  "you",
+  "he",
+  "she",
+  "they",
+  "me",
+  "us",
+  "him",
+  "them",
+  "my",
+  "mine",
+  "s",
+  "t",
+  "ll",
+  "ve",
+  "re",
+  "d",
+  "m",
+  "also",
+  "just",
+  "then",
+  "so",
+  "as",
+  "from",
+  "into",
+  "about",
+  "was",
+  "were",
+  "been",
+  "has",
+  "have",
+  "had",
+]);
+
+function matchStem(word: string): string {
+  let w = word;
+  if (w.length > 6 && w.endsWith("ments")) w = w.slice(0, -5);
+  else if (w.length > 5 && w.endsWith("ment")) w = w.slice(0, -4);
+  else if (w.length > 4 && (w.endsWith("ies") || w.endsWith("ied"))) w = w.slice(0, -3) + "y";
+  else if (w.length > 5 && w.endsWith("ing")) w = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith("ed")) w = w.slice(0, -2);
+  else if (w.length > 4 && /(s|x|z|ch|sh)es$/.test(w)) w = w.slice(0, -2);
+  else if (w.length > 3 && w.endsWith("s") && !/(ss|us|is)$/.test(w)) w = w.slice(0, -1);
+  if (w.length > 3 && w.endsWith("e")) w = w.slice(0, -1);
+  return w;
+}
+
+export function matchTokens(text: string, ignore: string[] = []): string[] {
+  const prepare = (raw: string) => {
+    let lower = (raw || "").toLowerCase();
+    for (const [re, to] of MATCH_PHRASES) lower = lower.replace(re, to);
+    return lower
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w && !MATCH_STOPWORDS.has(w))
+      .map((w) => matchStem(MATCH_SYNONYMS[w] ?? w));
+  };
+  const ignored = new Set(ignore.flatMap(prepare));
+  return prepare(text).filter((w) => !ignored.has(w));
+}
+
+const GENERIC_TASK_WORDS = new Set(
+  matchTokens(
+    "complete completed finish finished finalize do done handle work task make prepare get take care responsibility start continue ensure remaining remain rest please need",
+  ),
+);
+
+function taskMatchTokens(text: string, ignore: string[]): string[] {
+  return Array.from(new Set(matchTokens(text, ignore).filter((w) => !GENERIC_TASK_WORDS.has(w))));
+}
+
+interface TaskShape {
+  tokens: Set<string>;
+  segments: string[][];
+}
+
+function taskShape(title: string, ignore: string[]): TaskShape {
+  const tokens = new Set(taskMatchTokens(title, ignore));
+  const segments = (title || "")
+    .split(/\s*(?:,|;|&|\band\b|\bthen\b|\bplus\b|\bas well as\b)\s*/i)
+    .map((part) => taskMatchTokens(part, ignore))
+    .filter((part) => part.length > 0);
+  return { tokens, segments: segments.length > 0 ? segments : [Array.from(tokens)] };
+}
+
+function coveredSegments(clause: string, shape: TaskShape, ignore: string[]): number[] {
+  if (shape.tokens.size === 0) return [];
+  const words = new Set(matchTokens(clause, ignore));
+  const hits = Array.from(shape.tokens).filter((w) => words.has(w)).length;
+  if (hits < Math.min(2, shape.tokens.size)) return [];
+  const covered: Array<{ index: number; ratio: number }> = [];
+  shape.segments.forEach((segment, index) => {
+    const segHits = segment.filter((w) => words.has(w)).length;
+    if (segHits >= Math.max(1, Math.ceil(segment.length * 0.6))) {
+      covered.push({ index, ratio: segHits / segment.length });
+    }
+  });
+  const best = Math.max(0, ...covered.map((c) => c.ratio));
+  return covered.filter((c) => c.ratio === best).map((c) => c.index);
+}
 
 function splitSentences(text: string): string[] {
   return (text || "")
@@ -319,48 +475,154 @@ function splitSentences(text: string): string[] {
     .filter(Boolean);
 }
 
-function mentionsTask(sentence: string, taskWords: string[]): boolean {
-  if (taskWords.length === 0) return false;
-  const words = new Set(significantWords(sentence));
-  const hits = taskWords.filter((w) => words.has(w)).length;
-  const needed = taskWords.length <= 2 ? taskWords.length : Math.ceil(taskWords.length * 0.6);
-  return hits >= needed;
+function splitClauses(sentence: string): string[] {
+  return sentence
+    .split(/,?\s+\b(?:but|however|although|though|except|whereas)\b\s*|;\s*/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
-/** Words that describe the work itself; completion verbs are excluded. */
-function taskSubjectWords(title: string, ignore: string[] = []): string[] {
-  const generic = new Set(
-    significantWords(
-      "complete completed finish finished finalize do done handle work task make prepare get",
-    ),
-  );
-  return Array.from(new Set(significantWords(title, ignore).filter((w) => !generic.has(w))));
+export function assessTaskStatus(
+  text: string,
+  taskTitle: string,
+  ignore: string[] = [],
+): TaskStatus {
+  const shape = taskShape(taskTitle, ignore);
+  if (shape.tokens.size === 0) return "pending";
+  const segmentState = new Map<number, "done" | "remaining">();
+  let progress = false;
+  for (const sentence of splitSentences(text)) {
+    const question = /\?\s*$/.test(sentence);
+    for (const clause of splitClauses(sentence)) {
+      const covered = coveredSegments(clause, shape, ignore);
+      if (covered.length === 0) continue;
+      const clauseQuestion = question || /\?\s*$/.test(clause);
+      if (!clauseQuestion && COMPLETION_RE.test(clause) && !NEGATION_RE.test(clause)) {
+        for (const i of covered) segmentState.set(i, "done");
+      } else if (REMAINING_RE.test(clause)) {
+        for (const i of covered) segmentState.set(i, "remaining");
+      } else if (
+        !clauseQuestion &&
+        PROGRESS_RE.test(clause) &&
+        !PROGRESS_NEGATION_RE.test(clause)
+      ) {
+        progress = true;
+      }
+    }
+  }
+  const states = Array.from(segmentState.values());
+  const done = states.filter((s) => s === "done").length;
+  const remaining = states.length - done;
+  if (done > 0 && remaining > 0) return "in_progress";
+  if (done > 0 && done >= Math.ceil(shape.segments.length / 2)) return "done";
+  if (done > 0 || progress) return "in_progress";
+  return "pending";
 }
 
-/**
- * Returns true if `text` contains a sentence that refers to the task and
- * states that it is complete (and is not negated or future tense).
- */
 export function confirmsCompletion(
   text: string,
   taskTitle: string,
   ignore: string[] = [],
 ): boolean {
-  const subject = taskSubjectWords(taskTitle, ignore);
-  return splitSentences(text).some(
-    (s) => COMPLETION_RE.test(s) && !NEGATION_RE.test(s) && mentionsTask(s, subject),
-  );
+  return assessTaskStatus(text, taskTitle, ignore) === "done";
 }
 
-/** Finds a deadline phrase stated for the task in the discussion text. */
+export function mentionsProgress(text: string, taskTitle: string, ignore: string[] = []): boolean {
+  return assessTaskStatus(text, taskTitle, ignore) === "in_progress";
+}
+
+export function taskTitlesMatch(a: string, b: string, ignore: string[] = []): boolean {
+  const ta = new Set(taskMatchTokens(a, ignore));
+  const tb = new Set(taskMatchTokens(b, ignore));
+  if (ta.size === 0 || tb.size === 0) return false;
+  const shared = Array.from(ta).filter((w) => tb.has(w)).length;
+  return shared / Math.max(ta.size, tb.size) >= 0.6;
+}
+
+const STATUS_RANK: Record<TaskStatus, number> = { pending: 0, in_progress: 1, done: 2 };
+
+export function mergeTaskStatus(
+  prior: string | null | undefined,
+  incoming: string | null | undefined,
+): TaskStatus {
+  const a = normalizeStatus(prior ?? "");
+  const b = normalizeStatus(incoming ?? "");
+  return STATUS_RANK[b] > STATUS_RANK[a] ? b : a;
+}
+
+export function statusFromRecords(
+  text: string,
+  taskTitle: string,
+  ignore: string[] = [],
+): TaskStatus {
+  return assessTaskStatus(text, taskTitle, ignore);
+}
+
+export function evidenceSupported(evidence: string, recordsText: string): boolean {
+  const words = Array.from(new Set(significantWords(evidence)));
+  if (words.length === 0) return false;
+  const available = new Set(significantWords(recordsText));
+  const hits = words.filter((w) => available.has(w)).length;
+  return hits / words.length >= 0.6;
+}
+
+export interface ProgressMeeting {
+  id: string;
+  date: string;
+  text: string;
+}
+
+export interface ProgressTask {
+  id: string;
+  meeting_id: string;
+  title: string;
+  status: string;
+  canonical_key?: string | null;
+}
+
+export function planTaskProgressUpdates(
+  meetings: ProgressMeeting[],
+  tasks: ProgressTask[],
+  ignore: string[] = [],
+): Array<{ id: string; status: TaskStatus }> {
+  const order = [...meetings].sort(
+    (a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id),
+  );
+  const position = new Map(order.map((m, i) => [m.id, i]));
+  const keyFor = (t: ProgressTask) =>
+    (t.canonical_key || "").trim() || canonicalTaskKey(t.title, ignore);
+
+  const updates: Array<{ id: string; status: TaskStatus }> = [];
+  for (const t of tasks) {
+    const index = position.get(t.meeting_id);
+    if (index === undefined) continue;
+    const current = normalizeStatus(t.status);
+    if (current === "done") continue;
+    const key = keyFor(t);
+    let next: TaskStatus = current;
+    for (const other of tasks) {
+      const otherIndex = position.get(other.meeting_id);
+      if (otherIndex === undefined || otherIndex <= index) continue;
+      if (keyFor(other) === key || taskTitlesMatch(t.title, other.title, ignore)) {
+        next = mergeTaskStatus(next, other.status);
+      }
+    }
+    for (let i = index + 1; i < order.length && next !== "done"; i++) {
+      next = mergeTaskStatus(next, assessTaskStatus(order[i].text, t.title, ignore));
+    }
+    if (next !== current) updates.push({ id: t.id, status: next });
+  }
+  return updates;
+}
+
 export function deadlineMentionedFor(
   text: string,
   taskTitle: string,
   ignore: string[] = [],
 ): string | null {
-  const subject = taskSubjectWords(taskTitle, ignore);
+  const shape = taskShape(taskTitle, ignore);
   for (const s of splitSentences(text)) {
-    if (!mentionsTask(s, subject)) continue;
+    if (coveredSegments(s, shape, ignore).length === 0) continue;
     const iso = /\b\d{4}-\d{2}-\d{2}\b/.exec(s);
     if (iso) return iso[0];
     const wd = WEEKDAY_RE.exec(s);
@@ -372,7 +634,7 @@ export function deadlineMentionedFor(
   return null;
 }
 
-function normalizeStatus(raw: string): TaskStatus {
+export function normalizeStatus(raw: string): TaskStatus {
   const s = (raw || "").toLowerCase().trim();
   if (s === "done" || s === "completed" || s === "complete") return "done";
   if (s === "in_progress" || s === "in-progress" || s === "in progress") return "in_progress";
@@ -387,18 +649,6 @@ function sameDeadline(a: string | null, b: string | null, ref?: string | null): 
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
-// ---------------------------------------------------------------------------
-// Reconciliation
-// ---------------------------------------------------------------------------
-
-/**
- * Reconciles tasks across meetings in chronological order.
- * - Keeps each meeting's records intact (historicalRecords).
- * - Marks a task done when a later record or discussion confirms completion.
- * - Flags deadline/assignee conflicts with evidence instead of overwriting.
- *
- * `ignoreWords` (e.g. participant names) are excluded from derived keys.
- */
 export function reconcileCrossMeetingTasks(
   meetings: MeetingRef[],
   meetingActions: Record<string, ActionItemRecord[]>,
@@ -473,7 +723,6 @@ export function reconcileCrossMeetingTasks(
         continue;
       }
 
-      // Same task seen again in a later meeting.
       if (a.id) existing.id = a.id;
       if (existing.status !== "done" && status !== "pending") {
         existing.status = status;
@@ -482,7 +731,7 @@ export function reconcileCrossMeetingTasks(
 
       if (assignee && assignee !== existing.assignee) {
         if (isPlaceholderAssignee(existing.assignee)) {
-          existing.assignee = assignee; // a real name replaces a placeholder
+          existing.assignee = assignee;
         } else if (!isPlaceholderAssignee(assignee)) {
           const conflict: ConflictRecord = {
             task_key: key,
@@ -523,7 +772,6 @@ export function reconcileCrossMeetingTasks(
       });
     }
 
-    // A later discussion may confirm a task from an earlier meeting.
     for (const task of taskMap.values()) {
       if (task.status === "done" || task.origin_meeting_id === meeting.id) continue;
       if (confirmsCompletion(contextText, task.title, ignoreWords)) {
@@ -547,10 +795,6 @@ export function reconcileCrossMeetingTasks(
   };
 }
 
-/**
- * Builds a grounded cumulative summary of a series of meetings from the
- * persisted records only.
- */
 export function buildVerifiedCumulativeSummary(
   project: { id: string; name: string },
   meetings: MeetingRef[],

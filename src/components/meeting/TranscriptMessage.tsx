@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { Check, ChevronDown, Copy, Scissors, Trash2, UserRound } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Check,
+  ChevronDown,
+  Copy,
+  Scissors,
+  Trash2,
+  UserRound,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,13 +19,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { Participant, Transcript } from "./types";
-import { copyText, formatTime, getInitials, isSameName, speakerTone } from "./utils";
+import { copyText, firstName, formatTime, getInitials, isSameName, speakerTone } from "./utils";
 
 export function TranscriptMessage({
   t,
   isHost,
   hostName,
   participants,
+  swapTarget,
   onSetSpeaker,
   onSplit,
   onDelete,
@@ -27,6 +36,7 @@ export function TranscriptMessage({
   isHost: boolean;
   hostName: string;
   participants: Participant[];
+  swapTarget: string;
   onSetSpeaker: (id: string, speaker: string) => void;
   onSplit: (id: string) => void;
   onDelete: (id: string) => void;
@@ -45,8 +55,11 @@ export function TranscriptMessage({
       return;
     }
     setCopied(true);
+    toast.success("Message copied to clipboard.");
     setTimeout(() => setCopied(false), 2000);
   }
+
+  const swapLabel = isHost ? firstName(swapTarget) || "Remote" : "Host";
 
   const avatar = (
     <div
@@ -77,10 +90,15 @@ export function TranscriptMessage({
                 aria-label={`Message options. Speaker: ${t.speaker}`}
               >
                 {t.speaker}
-                {isHost && <span className="font-normal text-muted-foreground">(you)</span>}
+                {isHost && <span className="font-normal text-muted-foreground">(Host)</span>}
                 <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuItem onSelect={() => onSetSpeaker(t.id, swapTarget)}>
+                  <ArrowLeftRight className="mr-2 h-4 w-4 text-primary" />
+                  Switch to {swapTarget}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 {speakerOptions.length > 0 && <DropdownMenuLabel>Change speaker</DropdownMenuLabel>}
                 {speakerOptions.map((name) => (
                   <DropdownMenuItem key={name} onSelect={() => onSetSpeaker(t.id, name)}>
@@ -90,6 +108,10 @@ export function TranscriptMessage({
                   </DropdownMenuItem>
                 ))}
                 {speakerOptions.length > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuItem onSelect={() => void copy()}>
+                  <Copy className="mr-2 h-4 w-4 text-muted-foreground" />
+                  Copy message text
+                </DropdownMenuItem>
                 {multiLine && (
                   <DropdownMenuItem onSelect={() => onSplit(t.id)}>
                     <Scissors className="mr-2 h-4 w-4 text-muted-foreground" />
@@ -106,19 +128,47 @@ export function TranscriptMessage({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 text-muted-foreground"
-            onClick={() => void copy()}
-            aria-label="Copy message"
-          >
-            {copied ? (
-              <Check className="h-3.5 w-3.5 text-success" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 text-muted-foreground"
+              onClick={() => void copy()}
+              aria-label="Copy message"
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5 text-success" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+            </Button>
+            {!readOnly && multiLine && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 gap-1 rounded-full px-2 text-xs text-warning"
+                onClick={() => onSplit(t.id)}
+                aria-label="Split into separate messages"
+              >
+                <Scissors className="h-3 w-3" aria-hidden /> Split
+              </Button>
             )}
-          </Button>
+            {!readOnly && (
+              <Button
+                variant="outline"
+                size="sm"
+                className={`h-6 gap-1 rounded-full px-2 text-xs font-semibold ${
+                  isHost ? "border-primary/40 text-primary" : "border-border text-muted-foreground"
+                }`}
+                onClick={() => onSetSpeaker(t.id, swapTarget)}
+                aria-label={`Switch speaker to ${swapTarget}`}
+                title={`Click to switch speaker to ${swapTarget}`}
+              >
+                <ArrowLeftRight className="h-3 w-3" aria-hidden />
+                {swapLabel}
+              </Button>
+            )}
+          </div>
         </div>
         <p className="whitespace-pre-wrap text-sm leading-relaxed">{t.content}</p>
         <p className="mt-1.5 text-right text-xs text-muted-foreground">

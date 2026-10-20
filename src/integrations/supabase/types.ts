@@ -1,8 +1,6 @@
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.5";
   };
@@ -439,11 +437,11 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      admin_ai_usage: { Args: never; Returns: Json };
       admin_list_meetings: {
         Args: never;
         Returns: {
           created_at: string;
+          duration_seconds: number;
           has_summary: boolean;
           host_email: string;
           host_name: string;
@@ -496,7 +494,6 @@ export type Database = {
           snippet: string;
         }[];
       };
-      seed_demo_workspace: { Args: never; Returns: Json };
     };
     Enums: {
       app_role: "admin" | "user";

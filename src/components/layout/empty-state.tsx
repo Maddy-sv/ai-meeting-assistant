@@ -6,12 +6,11 @@ export interface EmptyStateProps {
   icon?: ComponentType<{ className?: string }>;
   title: ReactNode;
   description?: ReactNode;
-  /** One or more buttons, e.g. `<Button variant="brand">Create</Button>`. */
+
   action?: ReactNode;
   className?: string;
 }
 
-/** Friendly placeholder for lists or views that have no data yet. */
 export function EmptyState({
   icon: Icon = Inbox,
   title,

@@ -8,6 +8,11 @@ import {
   buildVerifiedCumulativeSummary,
   confirmsCompletion,
   deadlineMentionedFor,
+  evidenceSupported,
+  mentionsProgress,
+  mergeTaskStatus,
+  planTaskProgressUpdates,
+  statusFromRecords,
   isPlaceholderAssignee,
   normalizeAssignee,
   safeFormatDeadline,
@@ -313,7 +318,7 @@ describe("Assignees", () => {
 });
 
 describe("Deadline resolution", () => {
-  const ref = "2026-10-16T10:00:00Z"; // a Friday
+  const ref = "2026-10-16T10:00:00Z";
 
   it("turns weekday names into calendar dates", () => {
     assert.strictEqual(safeFormatDeadline("Wednesday", ref), "21 Oct 2026");
@@ -331,5 +336,133 @@ describe("Deadline resolution", () => {
     assert.strictEqual(resolveDeadlineToISODate("2026-11-05", ref), "2026-11-05");
     assert.strictEqual(resolveDeadlineToISODate("not a date", ref), null);
     assert.strictEqual(resolveDeadlineToDate("Tuesday evening", ref)?.getHours(), 18);
+  });
+});
+
+describe("mentionsProgress", () => {
+  it("detects work that has started on the task", () => {
+    assert.strictEqual(
+      mentionsProgress("Avery: I'm working on the onboarding emails.", "Write onboarding emails"),
+      true,
+    );
+    assert.strictEqual(
+      mentionsProgress("The pricing page is halfway there.", "Update pricing page"),
+      true,
+    );
+    assert.strictEqual(
+      mentionsProgress("Jo: I started the database migration yesterday.", "Run database migration"),
+      true,
+    );
+    assert.strictEqual(mentionsProgress("Budget review is partly done.", "Budget review"), true);
+    assert.strictEqual(mentionsProgress("Security audit is in progress.", "Security audit"), true);
+  });
+
+  it("ignores plans, questions, negations and other tasks", () => {
+    assert.strictEqual(
+      mentionsProgress(
+        "I'll start working on the onboarding emails tomorrow.",
+        "Write onboarding emails",
+      ),
+      false,
+    );
+    assert.strictEqual(
+      mentionsProgress("Have you started the database migration?", "Run database migration"),
+      false,
+    );
+    assert.strictEqual(
+      mentionsProgress("Nobody has started the database migration.", "Run database migration"),
+      false,
+    );
+    assert.strictEqual(
+      mentionsProgress("I haven't started the security audit.", "Security audit"),
+      false,
+    );
+    assert.strictEqual(
+      mentionsProgress("I'm working on the logo.", "Run database migration"),
+      false,
+    );
+  });
+
+  it("does not treat partial progress as completion", () => {
+    assert.strictEqual(confirmsCompletion("Budget review is partly done.", "Budget review"), false);
+    assert.strictEqual(
+      statusFromRecords("Budget review is partly done.", "Budget review"),
+      "in_progress",
+    );
+    assert.strictEqual(statusFromRecords("Budget review is done.", "Budget review"), "done");
+    assert.strictEqual(statusFromRecords("We talked about lunch.", "Budget review"), "pending");
+  });
+});
+
+describe("mergeTaskStatus", () => {
+  it("only moves tasks forward", () => {
+    assert.strictEqual(mergeTaskStatus("pending", "in_progress"), "in_progress");
+    assert.strictEqual(mergeTaskStatus("pending", "done"), "done");
+    assert.strictEqual(mergeTaskStatus("in_progress", "done"), "done");
+    assert.strictEqual(mergeTaskStatus("done", "pending"), "done");
+    assert.strictEqual(mergeTaskStatus("in_progress", "pending"), "in_progress");
+    assert.strictEqual(mergeTaskStatus(null, "in progress"), "in_progress");
+    assert.strictEqual(mergeTaskStatus(undefined, null), "pending");
+  });
+});
+
+describe("evidenceSupported", () => {
+  const records = "Avery: I will send the onboarding emails by Friday.\nJo: Great.";
+  it("accepts quotes that come from the records", () => {
+    assert.strictEqual(
+      evidenceSupported("I will send the onboarding emails by Friday", records),
+      true,
+    );
+  });
+  it("rejects empty or invented quotes", () => {
+    assert.strictEqual(evidenceSupported("", records), false);
+    assert.strictEqual(
+      evidenceSupported("Migrate the billing database to Postgres", records),
+      false,
+    );
+  });
+});
+
+describe("planTaskProgressUpdates", () => {
+  const meetings = [
+    {
+      id: "m2",
+      date: "2026-10-03T10:00:00Z",
+      text: "Avery: I'm working on the onboarding emails.",
+    },
+    { id: "m1", date: "2026-10-01T10:00:00Z", text: "Avery: I will write the onboarding emails." },
+    { id: "m3", date: "2026-10-05T10:00:00Z", text: "Jo: The budget review is done." },
+  ];
+
+  it("moves earlier tasks forward using later meetings", () => {
+    const updates = planTaskProgressUpdates(meetings, [
+      { id: "a", meeting_id: "m1", title: "Write onboarding emails", status: "pending" },
+      { id: "b", meeting_id: "m1", title: "Budget review", status: "in_progress" },
+      { id: "c", meeting_id: "m1", title: "Book venue", status: "pending" },
+    ]);
+    assert.deepStrictEqual(
+      updates.sort((x, y) => x.id.localeCompare(y.id)),
+      [
+        { id: "a", status: "in_progress" },
+        { id: "b", status: "done" },
+      ],
+    );
+  });
+
+  it("never downgrades and ignores the task's own meeting and earlier ones", () => {
+    const updates = planTaskProgressUpdates(meetings, [
+      { id: "a", meeting_id: "m1", title: "Write onboarding emails", status: "done" },
+      { id: "b", meeting_id: "m3", title: "Write onboarding emails", status: "pending" },
+      { id: "c", meeting_id: "m3", title: "Budget review", status: "pending" },
+    ]);
+    assert.deepStrictEqual(updates, []);
+  });
+
+  it("uses the same task's status in a later meeting", () => {
+    const updates = planTaskProgressUpdates(meetings, [
+      { id: "a", meeting_id: "m1", title: "Book venue", status: "pending" },
+      { id: "b", meeting_id: "m2", title: "Book the venue", status: "done" },
+    ]);
+    assert.deepStrictEqual(updates, [{ id: "a", status: "done" }]);
   });
 });

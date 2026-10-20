@@ -57,7 +57,6 @@ function Section({
   );
 }
 
-/** Pre-meeting briefing: what happened in related earlier meetings and what is still open. */
 export function BriefingPanel({ meetingId }: { meetingId: string }) {
   const fetchBriefing = useServerFn(getMeetingBriefing);
   const [briefing, setBriefing] = useState<Briefing | null>(null);

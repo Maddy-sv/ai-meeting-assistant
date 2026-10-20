@@ -3,6 +3,7 @@ import { useRouter } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Circle,
+  Download,
   ExternalLink,
   Link2,
   Loader2,
@@ -26,11 +27,12 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 import type { MeetingRecording } from "@/hooks/use-meeting-recording";
 import { CopyTranscriptMenu } from "./CopyTranscriptMenu";
 import { meetingStatusClass, meetingStatusLabel } from "./status";
 import type { Meeting, Transcript } from "./types";
-import { formatDateTime, formatDuration } from "./utils";
+import { downloadTranscript, formatDateTime, formatDuration } from "./utils";
 
 function AddMeetingLinkDialog({ onSave }: { onSave: (link: string) => Promise<boolean> }) {
   const [open, setOpen] = useState(false);
@@ -100,7 +102,7 @@ export function MeetingHeader({
   onOpenPip: () => void;
   onShareEmail: () => void;
   onSaveLink: (link: string) => Promise<boolean>;
-  /** Hide every control that would change the meeting (viewer is not the host). */
+
   readOnly?: boolean;
 }) {
   const router = useRouter();
@@ -154,6 +156,14 @@ export function MeetingHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            className={`rounded-full ${live ? "border-primary/50 text-primary shadow-glow" : ""}`}
+            onClick={onOpenPip}
+            title="Pop out a floating window over your meeting tab so you don't need to split screen or switch tabs"
+          >
+            <Maximize2 className="h-4 w-4" /> Floating Overlay
+          </Button>
           {!completed && !live && (
             <>
               {meeting.meeting_link ? (
@@ -175,7 +185,7 @@ export function MeetingHeader({
                   disabled={recording.support === "unsupported"}
                   className="gradient-bg rounded-full text-primary-foreground shadow-glow"
                 >
-                  <Video className="h-4 w-4" /> Start recording
+                  <Video className="h-4 w-4" /> Join as AI Assistant
                 </Button>
               )}
             </>
@@ -203,9 +213,6 @@ export function MeetingHeader({
                 )}
                 End meeting
               </Button>
-              <Button variant="outline" className="rounded-full" onClick={onOpenPip}>
-                <Maximize2 className="h-4 w-4" /> Floating window
-              </Button>
             </>
           )}
           <CopyTranscriptMenu meeting={meeting} transcripts={transcripts} />
@@ -213,10 +220,22 @@ export function MeetingHeader({
             <Button
               onClick={onShareEmail}
               className="gradient-bg rounded-full text-primary-foreground shadow-glow"
+              title="Share the full meeting recap, action items and summary by email or Gmail"
             >
-              <Mail className="h-4 w-4" /> Share by email
+              <Mail className="h-4 w-4" /> Share via Email
             </Button>
           )}
+          <Button
+            variant="outline"
+            className="rounded-full"
+            onClick={() => {
+              if (!downloadTranscript(meeting, transcripts)) {
+                toast.info("There is no transcript to download yet.");
+              }
+            }}
+          >
+            <Download className="h-4 w-4" /> Download
+          </Button>
         </div>
       </header>
     </div>

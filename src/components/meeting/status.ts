@@ -1,4 +1,3 @@
-/** Single source of truth for meeting and task status colours (see the design brief). */
 import { normalizeMeetingStatus } from "@/components/layout/status";
 
 export type TaskStatus = "pending" | "in_progress" | "done";
@@ -17,7 +16,6 @@ const TASK_STATUS_CLASS: Record<TaskStatus, string> = {
   done: "bg-success/15 text-success",
 };
 
-/** Maps legacy values ("completed") onto the three supported task statuses. */
 export function normalizeTaskStatus(status: string | null | undefined): TaskStatus {
   if (status === "done" || status === "completed") return "done";
   if (status === "in_progress") return "in_progress";

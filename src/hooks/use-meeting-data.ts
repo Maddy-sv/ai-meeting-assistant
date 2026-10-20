@@ -11,11 +11,6 @@ import type {
 
 export type MeetingData = ReturnType<typeof useMeetingData>;
 
-/**
- * Loads one meeting with its transcript, participants, summary, tasks and decisions,
- * and keeps action items in sync through Supabase realtime. The database is the only
- * source of truth: nothing is cached locally and nothing is generated on load.
- */
 export function useMeetingData(meetingId: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +22,7 @@ export function useMeetingData(meetingId: string) {
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [hostName, setHostName] = useState("You");
   const [hostEmail, setHostEmail] = useState<string | null>(null);
-  /** The signed-in user; only the meeting host may change the meeting. */
+
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -78,7 +73,6 @@ export function useMeetingData(meetingId: string) {
     void reload();
   }, [reload]);
 
-  // Current user's display name, used to label their own speech.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -100,9 +94,6 @@ export function useMeetingData(meetingId: string) {
     };
   }, []);
 
-  // Realtime: keep action items in sync with the To-Do board and other tabs.
-  // DELETE events cannot be filtered by column (they only carry the primary
-  // key), so a separate unfiltered listener removes rows we have locally.
   useEffect(() => {
     const channel = supabase
       .channel(`meeting_actions_${meetingId}`)

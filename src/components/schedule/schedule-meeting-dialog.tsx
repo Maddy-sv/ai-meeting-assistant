@@ -58,8 +58,8 @@ const scheduleSchema = z.object({
         return false;
       }
     }, "Enter a full https:// link, or leave it empty."),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a date."),
-  time: z.string().regex(/^\d{2}:\d{2}$/, "Pick a time."),
+  date: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/, "Pick a date."),
+  time: z.string().regex(/^(\d{2}:\d{2})?$/, "Pick a time."),
   projectId: z.string(),
 });
 
@@ -68,19 +68,35 @@ type ScheduleValues = z.infer<typeof scheduleSchema>;
 export interface ScheduleMeetingDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Pre-filled date (e.g. the calendar day that was clicked). Defaults to today. */
+
   defaultDate?: Date | null;
-  /** Pre-selected project. */
+
   defaultProjectId?: string | null;
-  /** Email the signed-in user a confirmation through the `send-confirmation` function. */
+
   sendConfirmation?: boolean;
+
+  allowStartNow?: boolean;
   title?: string;
   onCreated?: (meeting: MeetingListRow) => void;
 }
 
-function defaultsFor(date: Date | null | undefined, projectId: string | null | undefined) {
+function defaultsFor(
+  date: Date | null | undefined,
+  projectId: string | null | undefined,
+  startNow: boolean,
+) {
   const now = new Date();
-  // Default to the next full hour so the meeting is in the future.
+  if (startNow && !date) {
+    return {
+      title: "",
+      platform: "google_meet" as const,
+      link: "",
+      date: "",
+      time: "",
+      projectId: projectId ?? NO_PROJECT,
+    };
+  }
+
   const nextHour = new Date(now.getTime() + 60 * 60 * 1000);
   return {
     title: "",
@@ -92,13 +108,13 @@ function defaultsFor(date: Date | null | undefined, projectId: string | null | u
   };
 }
 
-/** Dialog that creates an upcoming meeting (title, platform, link, date/time, project). */
 export function ScheduleMeetingDialog({
   open,
   onOpenChange,
   defaultDate,
   defaultProjectId,
-  sendConfirmation = false,
+  sendConfirmation = true,
+  allowStartNow = false,
   title = "Schedule a meeting",
   onCreated,
 }: ScheduleMeetingDialogProps) {
@@ -115,20 +131,27 @@ export function ScheduleMeetingDialog({
 
   const form = useForm<ScheduleValues>({
     resolver: zodResolver(scheduleSchema),
-    defaultValues: defaultsFor(defaultDate, defaultProjectId),
+    defaultValues: defaultsFor(defaultDate, defaultProjectId, allowStartNow),
   });
 
-  // Reset the form each time the dialog opens, using the latest default date.
   useEffect(() => {
-    if (open) form.reset(defaultsFor(defaultDate, defaultProjectId));
-  }, [open, defaultDate, defaultProjectId, form]);
+    if (open) form.reset(defaultsFor(defaultDate, defaultProjectId, allowStartNow));
+  }, [open, defaultDate, defaultProjectId, allowStartNow, form]);
 
   async function onSubmit(values: ScheduleValues) {
     if (!user) {
       toast.error("Your session has expired. Please sign in again.");
       return;
     }
-    const scheduledAt = new Date(`${values.date}T${values.time}`);
+    if (!values.date && !allowStartNow) {
+      form.setError("date", { message: "Pick a date." });
+      return;
+    }
+    if (values.date && !values.time) {
+      form.setError("time", { message: "Pick a time." });
+      return;
+    }
+    const scheduledAt = values.date ? new Date(`${values.date}T${values.time}`) : new Date();
     if (Number.isNaN(scheduledAt.getTime())) {
       form.setError("date", { message: "That date and time is not valid." });
       return;
@@ -212,10 +235,13 @@ export function ScheduleMeetingDialog({
                 name="date"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Date</FormLabel>
+                    <FormLabel>{allowStartNow ? "Date (optional)" : "Date"}</FormLabel>
                     <FormControl>
                       <Input type="date" {...field} />
                     </FormControl>
+                    {allowStartNow && (
+                      <FormDescription>Leave empty to start the meeting now.</FormDescription>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -225,7 +251,7 @@ export function ScheduleMeetingDialog({
                 name="time"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Time</FormLabel>
+                    <FormLabel>{allowStartNow ? "Time (optional)" : "Time"}</FormLabel>
                     <FormControl>
                       <Input type="time" {...field} />
                     </FormControl>

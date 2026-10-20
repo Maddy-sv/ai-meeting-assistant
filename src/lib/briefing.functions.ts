@@ -17,7 +17,7 @@ export interface MeetingBriefing {
     meetingTitle: string;
   }[];
   recentDecisions: { description: string; meetingTitle: string }[];
-  /** Short AI-written briefing; null when the AI is unavailable or there is nothing to brief. */
+
   narrative: string | null;
 }
 
@@ -27,11 +27,6 @@ const DECISION_LIMIT = 10;
 
 const BriefingInput = z.object({ meetingId: uuid });
 
-/**
- * Context to prepare for a meeting: earlier meetings in the same project (or,
- * without a project, the caller's last completed meetings), their open tasks
- * and recent decisions, plus an optional AI narrative.
- */
 export const getMeetingBriefing = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: z.input<typeof BriefingInput>) => parseInput(BriefingInput, input))
@@ -136,8 +131,6 @@ export const getMeetingBriefing = createServerFn({ method: "POST" })
       });
       briefing.narrative = res.text.trim() || null;
     } catch (err) {
-      // The briefing data is still useful without the narrative; the failure is
-      // recorded in ai_usage and logged here.
       console.warn("[briefing] narrative unavailable:", err instanceof Error ? err.message : err);
     }
     return briefing;

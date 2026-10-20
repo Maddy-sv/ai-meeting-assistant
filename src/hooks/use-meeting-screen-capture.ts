@@ -3,9 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const CHUNK_MS = 12_000;
 const SCREENSHOT_MS = 15_000;
 const MIN_CHUNK_BYTES = 5_000;
-/** Remote audio is only sent if the tab produced sound within this window. */
+
 const RECENT_AUDIO_MS = 15_000;
-/** Longest stop() waits for the final clip to be transcribed. */
+
 const STOP_TIMEOUT_MS = 35_000;
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -17,11 +17,8 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-/**
- * Captures a shared tab or screen: its audio is recorded in self-contained 12-second
- * clips (each a complete WebM file) and handed to `onAudioChunk` for remote
- * transcription, and a low-resolution screenshot is kept every 15 seconds.
- */
+export type ShareResult = { ok: boolean; audio: boolean };
+
 export function useScreenShareCapture(options: {
   onAudioChunk: (dataUrl: string) => void | Promise<unknown>;
   isPaused: () => boolean;
@@ -38,18 +35,13 @@ export function useScreenShareCapture(options: {
   const lastRemoteAudioAtRef = useRef(0);
   const analyserFailedRef = useRef(false);
   const screenshotsRef = useRef<string[]>([]);
-  /** Clips being converted or transcribed; stop() waits for them. */
+
   const pendingRef = useRef(new Set<Promise<unknown>>());
   const optionsRef = useRef(options);
   useEffect(() => {
     optionsRef.current = options;
   });
 
-  /**
-   * Stops sharing. The returned promise resolves once the final clip (recorded
-   * up to this moment) and every clip already in flight have been handled, or
-   * after a safety timeout.
-   */
   const stop = useCallback((): Promise<unknown> => {
     activeRef.current = false;
     if (chunkTimerRef.current) clearTimeout(chunkTimerRef.current);
@@ -64,7 +56,6 @@ export function useScreenShareCapture(options: {
     recorderRef.current = null;
     let finalClip: Promise<void> = Promise.resolve();
     if (rec && rec.state !== "inactive") {
-      // Registered after `onstop`, so it runs once the last clip has been queued.
       finalClip = new Promise((resolve) =>
         rec.addEventListener("stop", () => resolve(), { once: true }),
       );
@@ -115,14 +106,16 @@ export function useScreenShareCapture(options: {
     }, CHUNK_MS);
   }, []);
 
-  const start = useCallback(async (): Promise<boolean> => {
-    if (streamRef.current) return true;
-    if (!navigator.mediaDevices?.getDisplayMedia) return false;
+  const start = useCallback(async (): Promise<ShareResult> => {
+    if (streamRef.current) {
+      return { ok: true, audio: streamRef.current.getAudioTracks().length > 0 };
+    }
+    if (!navigator.mediaDevices?.getDisplayMedia) return { ok: false, audio: false };
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
     } catch {
-      return false;
+      return { ok: false, audio: false };
     }
     streamRef.current = stream;
     activeRef.current = true;
@@ -162,7 +155,6 @@ export function useScreenShareCapture(options: {
         };
         rafRef.current = requestAnimationFrame(loop);
       } catch {
-        // Without an analyser every clip counts as containing audio.
         analyserFailedRef.current = true;
       }
       recordClip(audioStream);
@@ -183,12 +175,11 @@ export function useScreenShareCapture(options: {
     }, SCREENSHOT_MS);
 
     stream.getVideoTracks()[0]?.addEventListener("ended", () => void stop());
-    return true;
+    return { ok: true, audio: audioTracks.length > 0 };
   }, [recordClip, stop]);
 
   const getScreenshots = useCallback(() => screenshotsRef.current, []);
 
-  /** True if the shared tab produced sound in the last `ms` milliseconds. */
   const remoteAudioActiveWithin = useCallback(
     (ms: number) => Date.now() - lastRemoteAudioAtRef.current < ms,
     [],

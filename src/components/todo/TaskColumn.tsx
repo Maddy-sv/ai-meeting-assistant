@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { TASK_STATUS_LABEL, taskStatusClass, type TaskStatus } from "@/components/meeting/status";
+import { taskStatusClass, type TaskStatus } from "@/components/meeting/status";
+import { TODO_STATUS_LABEL } from "./labels";
 import type { TodoMeeting, TodoTask } from "@/hooks/use-todo-tasks";
 import { TASK_DRAG_TYPE, TaskCard } from "./TaskCard";
 
@@ -44,7 +45,7 @@ export function TaskColumn({
     >
       <div className="mb-4 flex items-center justify-between">
         <h2 id={headingId} className="text-base font-semibold">
-          {TASK_STATUS_LABEL[status]}
+          {TODO_STATUS_LABEL[status]}
         </h2>
         <span
           className={`flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-xs font-semibold ${taskStatusClass(status)}`}

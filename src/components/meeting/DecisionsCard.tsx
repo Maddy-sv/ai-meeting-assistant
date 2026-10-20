@@ -39,17 +39,19 @@ function AddDecisionDialog({ tasks }: { tasks: MeetingTasks }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="rounded-full">
-          <Plus className="h-4 w-4" /> Add decision
+          <Plus className="h-4 w-4" /> Add Decision
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Record a decision</DialogTitle>
-          <DialogDescription>Log an agreement that was made in this meeting.</DialogDescription>
+          <DialogTitle>Log Strategic Decision</DialogTitle>
+          <DialogDescription>
+            Record a strategic agreement or decision made during this meeting.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="decision-description">Decision</Label>
+            <Label htmlFor="decision-description">Decision Description</Label>
             <Textarea
               id="decision-description"
               required
@@ -59,7 +61,7 @@ function AddDecisionDialog({ tasks }: { tasks: MeetingTasks }) {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="decision-made-by">Decided by (optional)</Label>
+            <Label htmlFor="decision-made-by">Decided By (Optional)</Label>
             <Input
               id="decision-made-by"
               value={madeBy}
@@ -95,13 +97,13 @@ export function DecisionsCard({
         <div className="flex items-center gap-2">
           <Gavel className="h-5 w-5 text-primary" aria-hidden />
           <h3 id="decisions-heading" className="text-lg font-semibold">
-            Decisions
+            Key Decisions
           </h3>
         </div>
         {!readOnly && <AddDecisionDialog tasks={tasks} />}
       </div>
       {decisions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No decisions recorded for this meeting.</p>
+        <p className="text-sm text-muted-foreground">No decisions logged.</p>
       ) : (
         <ul className="space-y-2">
           {decisions.map((d) => (
@@ -111,7 +113,9 @@ export function DecisionsCard({
             >
               <div>
                 <p className="text-sm font-medium">{d.description}</p>
-                {d.made_by && <p className="mt-1 text-xs text-muted-foreground">{d.made_by}</p>}
+                {d.made_by && (
+                  <p className="mt-1 text-xs text-muted-foreground">Decided by {d.made_by}</p>
+                )}
               </div>
               {!readOnly && (
                 <Button

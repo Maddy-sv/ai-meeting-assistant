@@ -31,12 +31,17 @@ import { formatDuration, platformLabel } from "@/lib/format";
 import { dataKeys, listMyMeetings, listProjects, type MeetingListRow } from "@/lib/rpc";
 import { normalizeMeetingStatus } from "@/components/layout/status";
 
+type StatusFilter = "all" | "upcoming" | "live" | "completed";
+
+const STATUS_FILTER_VALUES: StatusFilter[] = ["all", "upcoming", "live", "completed"];
+
 export const Route = createFileRoute("/_authenticated/meetings/")({
-  head: () => ({ meta: [{ title: "Meetings — AI Powered Meeting Companion" }] }),
+  validateSearch: (search: Record<string, unknown>): { status?: StatusFilter } => ({
+    status: STATUS_FILTER_VALUES.find((v) => v === search.status),
+  }),
+  head: () => ({ meta: [{ title: "My Meetings — AI Powered Meeting Companion" }] }),
   component: MeetingsList,
 });
-
-type StatusFilter = "all" | "upcoming" | "live" | "completed";
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All statuses" },
@@ -66,6 +71,7 @@ function MeetingsList() {
   const user = useUser();
   const userId = user?.id ?? "";
   const queryClient = useQueryClient();
+  const initialStatus = Route.useSearch().status ?? "all";
 
   const meetings = useQuery({
     queryKey: dataKeys.myMeetings(userId),
@@ -80,7 +86,7 @@ function MeetingsList() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("all");
+  const [status, setStatus] = useState<StatusFilter>(initialStatus);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
   const projectNames = useMemo(
@@ -117,7 +123,6 @@ function MeetingsList() {
     .filter((m) => normalizeMeetingStatus(m.status) === "completed")
     .sort((a, b) => meetingTime(b).localeCompare(meetingTime(a)));
 
-  // Only keep selections that are still visible.
   const visibleIds = new Set(filtered.map((m) => m.id));
   const selectedVisible = [...selected].filter((id) => visibleIds.has(id));
   const allVisibleSelected = filtered.length > 0 && selectedVisible.length === filtered.length;
@@ -168,7 +173,7 @@ function MeetingsList() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Meetings"
+        title="My Meetings"
         description="Schedule meetings, open past ones and review their summaries."
         actions={
           <Button variant="brand" onClick={() => setCreateOpen(true)}>
@@ -177,7 +182,12 @@ function MeetingsList() {
         }
       />
 
-      <ScheduleMeetingDialog open={createOpen} onOpenChange={setCreateOpen} title="New meeting" />
+      <ScheduleMeetingDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        title="New meeting"
+        allowStartNow
+      />
 
       {meetings.isLoading && <LoadingState variant="list" rows={5} label="Loading meetings…" />}
 

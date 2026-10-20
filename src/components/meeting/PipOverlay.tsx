@@ -6,7 +6,6 @@ import type { MeetingRecording } from "@/hooks/use-meeting-recording";
 import type { Transcript } from "./types";
 import { formatDuration, formatTime, getInitials, isSameName, speakerTone } from "./utils";
 
-/** Compact live transcript rendered into the floating Picture-in-Picture window. */
 export function PipOverlay({
   pipWindow,
   transcripts,

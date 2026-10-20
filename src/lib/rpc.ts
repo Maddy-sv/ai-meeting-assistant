@@ -1,21 +1,13 @@
-/**
- * Typed wrappers around the Postgres RPCs and the tables the pages share
- * (projects, meetings, chat history). Every helper throws a user-friendly
- * Error on failure, so callers can show `toast.error(err.message)`.
- */
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import type { Tables } from "@/integrations/supabase/types";
 
 function friendlyRpcError(error: { message: string; code?: string }): string {
-  // P0001 = RAISE EXCEPTION in our own SQL functions; those messages are written for users
-  // (e.g. "You cannot remove your own admin role").
   if (error.code === "P0001") return error.message;
   if (error.code === "42501") return "You don't have permission to do that.";
   return "Something went wrong. Please try again.";
 }
 
-/** Returns an RPC's data, or throws a user-friendly error. */
 function rpcData<T>(fn: string, res: { data: T; error: PostgrestError | null }): T {
   if (res.error) {
     console.error(`[rpc] ${fn} failed`, res.error);
@@ -24,14 +16,9 @@ function rpcData<T>(fn: string, res: { data: T; error: PostgrestError | null }):
   return res.data;
 }
 
-/* ------------------------------------------------------------------ rows */
-
 export type ProfileRow = Tables<"profiles">;
 export type NotificationRow = Tables<"notifications">;
 
-/* ------------------------------------------------------------------ RPCs */
-
-/** True when the signed-in user has the admin role (`public.is_admin()`). */
 export async function isAdmin(): Promise<boolean> {
   return Boolean(rpcData("is_admin", await supabase.rpc("is_admin")));
 }
@@ -44,12 +31,8 @@ export interface AdminOverview {
   transcripts: number;
   summaries: number;
   action_items: number;
-  ai_requests: number;
-  ai_requests_today: number;
-  ai_failures_today: number;
 }
 export async function adminOverview(): Promise<AdminOverview> {
-  // The function returns json; its shape is fixed by the SQL above.
   return rpcData(
     "admin_overview",
     await supabase.rpc("admin_overview"),
@@ -80,6 +63,7 @@ export interface AdminMeeting {
   created_at: string;
   transcript_count: number;
   has_summary: boolean;
+  duration_seconds: number | null;
 }
 export async function adminListMeetings(): Promise<AdminMeeting[]> {
   return rpcData("admin_list_meetings", await supabase.rpc("admin_list_meetings")) ?? [];
@@ -96,32 +80,6 @@ export async function adminSetUserActive(target: string, active: boolean): Promi
   rpcData("admin_set_user_active", await supabase.rpc("admin_set_user_active", { target, active }));
 }
 
-export interface AdminAiUsage {
-  total: number;
-  today: number;
-  failures_today: number;
-  avg_duration_ms: number | null;
-  by_function: { fn: string; count: number; failures: number }[];
-  daily: { day: string; count: number }[];
-}
-export async function adminAiUsage(): Promise<AdminAiUsage> {
-  return rpcData("admin_ai_usage", await supabase.rpc("admin_ai_usage")) as unknown as AdminAiUsage;
-}
-
-export interface SeedDemoResult {
-  project_id: string;
-  meeting_ids: string[];
-  /** False when the demo project already existed, so nothing new was added. */
-  created: boolean;
-}
-/** Inserts the sample research-scenario workspace for the calling user only. */
-export async function seedDemoWorkspace(): Promise<SeedDemoResult> {
-  const res = await supabase.rpc("seed_demo_workspace");
-  return rpcData("seed_demo_workspace", res) as unknown as SeedDemoResult;
-}
-
-/* --------------------------------------------------------------- search */
-
 export type SearchResultKind = "meeting" | "transcript" | "summary" | "task" | "decision";
 
 export interface SearchResult {
@@ -132,14 +90,11 @@ export interface SearchResult {
   occurred_at: string | null;
 }
 
-/** Searches the caller's meetings, transcripts, summaries, tasks and decisions (RLS applies). */
 export async function searchWorkspace(q: string): Promise<SearchResult[]> {
   const rows = rpcData("search_workspace", await supabase.rpc("search_workspace", { q })) ?? [];
-  // `kind` is one of the five literals produced by the SQL function.
+
   return rows.map((r) => ({ ...r, kind: r.kind as SearchResultKind }));
 }
-
-/* --------------------------------------------------------------- tables */
 
 async function runQuery<T>(
   query: PromiseLike<{ data: T; error: PostgrestError | null }>,
@@ -153,7 +108,6 @@ async function runQuery<T>(
   return data;
 }
 
-/** Row-level security skips rows the caller may not change; report that instead of succeeding. */
 function requireChanged(rows: { id: string }[] | null): void {
   if (!rows || rows.length === 0) {
     throw new Error("Not found, or you don't have permission to change it.");
@@ -167,7 +121,6 @@ export type ProjectRow = Pick<
 
 const PROJECT_COLUMNS = "id, name, description, owner_id, created_at";
 
-/** The user's projects, newest first. */
 export function listProjects(ownerId: string): Promise<ProjectRow[]> {
   return runQuery(
     supabase
@@ -179,7 +132,6 @@ export function listProjects(ownerId: string): Promise<ProjectRow[]> {
   ).then((r) => r ?? []);
 }
 
-/** One project, or null when it does not exist or is not visible to the caller. */
 export function getProject(id: string): Promise<ProjectRow | null> {
   return runQuery(
     supabase.from("projects").select(PROJECT_COLUMNS).eq("id", id).maybeSingle(),
@@ -219,7 +171,6 @@ export function updateProject(
   ).then(requireChanged);
 }
 
-/** Deletes a project. Its meetings are kept (`meetings.project_id` becomes null). */
 export function deleteProject(id: string): Promise<void> {
   return runQuery(
     supabase.from("projects").delete().eq("id", id).select("id"),
@@ -227,7 +178,6 @@ export function deleteProject(id: string): Promise<void> {
   ).then(requireChanged);
 }
 
-/** Meeting columns used by the list, calendar and project pages (includes `project_id`). */
 export type MeetingListRow = Pick<
   Tables<"meetings">,
   | "id"
@@ -246,7 +196,6 @@ export type MeetingListRow = Pick<
 const MEETING_LIST_COLUMNS =
   "id, title, platform, status, scheduled_at, started_at, created_at, duration_seconds, meeting_link, project_id, google_event_id";
 
-/** Meetings hosted by the user, newest first. */
 export function listMyMeetings(hostId: string): Promise<MeetingListRow[]> {
   return runQuery(
     supabase
@@ -258,7 +207,6 @@ export function listMyMeetings(hostId: string): Promise<MeetingListRow[]> {
   ).then((r) => r ?? []);
 }
 
-/** Meetings linked to a project, latest scheduled first. */
 export function listProjectMeetings(projectId: string): Promise<MeetingListRow[]> {
   return runQuery(
     supabase
@@ -280,7 +228,6 @@ export interface NewMeeting {
   googleEventId?: string | null;
 }
 
-/** Inserts upcoming meetings for the user and returns the created rows. */
 export function createMeetings(meetings: NewMeeting[]): Promise<MeetingListRow[]> {
   return runQuery(
     supabase
@@ -309,7 +256,6 @@ export interface ChatMessageRow {
   created_at: string;
 }
 
-/** The user's chat history, oldest first. */
 export function listChatMessages(userId: string): Promise<ChatMessageRow[]> {
   return runQuery(
     supabase
@@ -323,7 +269,6 @@ export function listChatMessages(userId: string): Promise<ChatMessageRow[]> {
   );
 }
 
-/** Deletes all of the user's chat messages. */
 export function clearChatMessages(userId: string): Promise<void> {
   return runQuery(
     supabase.from("chat_messages").delete().eq("user_id", userId),
@@ -331,9 +276,6 @@ export function clearChatMessages(userId: string): Promise<void> {
   ).then(() => undefined);
 }
 
-/* ----------------------------------------------------------- query keys */
-
-/** React Query keys for the data helpers above. Everything is scoped per user. */
 export const dataKeys = {
   myMeetings: (userId: string) => ["meetings", "mine", userId] as const,
   projects: (userId: string) => ["projects", userId] as const,
@@ -343,12 +285,6 @@ export const dataKeys = {
   search: (q: string) => ["search", q] as const,
 };
 
-/* ----------------------------------------------------------------- chat */
-
-/**
- * Sends one chat message; the server loads the history, answers and saves both messages.
- * The server function is imported lazily so it is not part of the app-shell bundle.
- */
 export async function askChat(message: string): Promise<string> {
   const { askChatBot } = await import("@/lib/ai.functions");
   const result = await askChatBot({ data: { message } });

@@ -2,24 +2,31 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Tables } from "@/integrations/supabase/types";
 import {
   canonicalTaskKey,
-  confirmsCompletion,
   deduplicateDecisions,
+  mergeTaskStatus,
   normalizeAssignee,
   resolveDeadlineToISODate,
+  statusFromRecords,
 } from "@/lib/continuous-memory";
 
-type Client = SupabaseClient<Database>;
+export type Client = SupabaseClient<Database>;
 export type ActionItemRow = Tables<"action_items">;
 export type DecisionRow = Tables<"decisions">;
 export type MeetingRow = Tables<"meetings">;
 
-/** Logs a database error and throws a user-friendly one. */
 export function fail(context: string, error: { message: string }, userMessage: string): never {
   console.error(`[db] ${context}:`, error.message);
   throw new Error(userMessage);
 }
 
-/** Loads a meeting and checks that the caller is its host. */
+export function jsonStrings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+        .map((v) => v.trim())
+    : [];
+}
+
 export async function requireOwnedMeeting(
   supabase: Client,
   userId: string,
@@ -35,7 +42,6 @@ export async function requireOwnedMeeting(
   return data;
 }
 
-/** The caller's display name, taken from their profile (never from client input). */
 export async function getHostName(supabase: Client, userId: string): Promise<string> {
   const { data, error } = await supabase
     .from("profiles")
@@ -70,16 +76,6 @@ export interface ExtractedActionItem {
   status?: string | null;
 }
 
-/**
- * Saves AI-extracted action items for a meeting without a delete-then-insert
- * window:
- * 1. upsert on (meeting_id, canonical_key), keeping progress a user already
- *    made (in_progress/done) unless the AI says the task is done;
- * 2. then delete AI-managed rows (those with a canonical key, or legacy rows
- *    whose title maps to one of the new keys) that are no longer present.
- * Tasks added by hand (no canonical key) are left alone. If the AI returned
- * no tasks, nothing is changed.
- */
 export async function saveExtractedActionItems(
   supabase: Client,
   meeting: Pick<MeetingRow, "id" | "scheduled_at" | "created_at">,
@@ -107,15 +103,11 @@ export async function saveExtractedActionItems(
     const key = canonicalTaskKey(title);
     if (rows.has(key)) continue;
 
-    const aiDone =
-      item.status === "done" ||
-      (opts.evidenceText ? confirmsCompletion(opts.evidenceText, title) : false);
-    const prior = existingByKey.get(key)?.status;
-    const status = aiDone
-      ? "done"
-      : prior === "done" || prior === "in_progress"
-        ? prior
-        : "pending";
+    const fromRecords = opts.evidenceText ? statusFromRecords(opts.evidenceText, title) : null;
+    const status = mergeTaskStatus(
+      mergeTaskStatus(existingByKey.get(key)?.status, item.status),
+      fromRecords,
+    );
 
     rows.set(key, {
       meeting_id: meeting.id,
@@ -128,13 +120,10 @@ export async function saveExtractedActionItems(
   }
   if (rows.size === 0) return existing ?? [];
 
-  // Legacy rows without a key that match a new key are replaced by the keyed row.
   const legacyMatches = (existing ?? []).filter(
     (r) => !r.canonical_key && rows.has(canonicalTaskKey(r.title)),
   );
   if (legacyMatches.length > 0) {
-    // Their key would collide with nothing (NULL), so give the newest one the key
-    // first; the upsert then updates it in place instead of creating a duplicate.
     const seen = new Set<string>();
     for (const r of legacyMatches) {
       const key = canonicalTaskKey(r.title);
@@ -178,11 +167,6 @@ export async function saveExtractedActionItems(
   return final ?? [];
 }
 
-/**
- * Replaces a meeting's decisions safely: new rows are inserted first and the
- * old rows are deleted afterwards (by id). If the AI returned no decisions,
- * nothing is changed.
- */
 export async function replaceDecisions(
   supabase: Client,
   meetingId: string,
@@ -214,7 +198,6 @@ export async function replaceDecisions(
   if (oldIds.length > 0) {
     const { error: delErr } = await supabase.from("decisions").delete().in("id", oldIds);
     if (delErr) {
-      // Roll back the new rows so the meeting does not show duplicates.
       await supabase
         .from("decisions")
         .delete()

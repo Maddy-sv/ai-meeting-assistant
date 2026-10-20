@@ -16,10 +16,10 @@ const buttonVariants = cva(
         secondary: "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
-        /** Primary call to action: brand gradient pill with a glow. */
+
         brand:
           "gradient-bg rounded-full text-primary-foreground shadow-glow hover:opacity-90 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        /** Secondary action on glass surfaces. */
+
         glass: "glass rounded-full text-foreground hover:bg-accent/15 focus-visible:ring-2",
       },
       size: {

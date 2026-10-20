@@ -4,16 +4,20 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { cleanAndAlignTranscripts } from "@/lib/ai.functions";
 import type { Participant } from "@/components/meeting/types";
-import { errorMessage, isSameName, mutationError } from "@/components/meeting/utils";
+import {
+  friendlyAiError,
+  isGenericRemote,
+  isSameName,
+  mutationError,
+} from "@/components/meeting/utils";
 import type { MeetingData } from "./use-meeting-data";
 
 export type NewParticipantInput = { name: string; email: string; role: string };
 
-/**
- * Edits to the transcript, participants and meeting link. Changes are applied
- * optimistically and rolled back when the database rejects them.
- */
-export function useMeetingTranscriptEdits(data: MeetingData) {
+export function useMeetingTranscriptEdits(
+  data: MeetingData,
+  options: { onCleaned?: () => Promise<unknown> } = {},
+) {
   const {
     meetingId,
     transcripts,
@@ -22,6 +26,7 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
     setParticipants,
     setMeeting,
     reload,
+    hostName,
   } = data;
   const cleanFn = useServerFn(cleanAndAlignTranscripts);
   const [cleaning, setCleaning] = useState(false);
@@ -41,7 +46,6 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
     }
   }
 
-  /** Splits a multi-line message: the first line stays in place, the rest become new rows. */
   async function splitMessage(transcriptId: string) {
     const target = transcripts.find((t) => t.id === transcriptId);
     if (!target) return;
@@ -75,7 +79,6 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
     }
     const { error: insErr } = await supabase.from("transcripts").insert(extra);
     if (insErr) {
-      // Restore the original text so nothing is lost.
       await supabase.from("transcripts").update({ content: target.content }).eq("id", transcriptId);
       toast.error(insErr.message || "Could not split the message.");
       return;
@@ -105,17 +108,35 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
       const res = await cleanFn({ data: { meetingId, rawText: rawText?.trim() || undefined } });
       if (res && Array.isArray(res.transcripts) && res.transcripts.length > 0) {
         await reload();
-        toast.success("Transcript cleaned and speakers re-aligned.");
+        toast.success("Transcripts cleaned, speech typos fixed, and speakers re-aligned!");
+        if (res.addedSpeakers.length > 0) {
+          toast.info(`Added ${res.addedSpeakers.join(", ")} to the participants.`);
+        }
+        setCleaning(false);
+        if (options.onCleaned) await options.onCleaned();
         return true;
       }
-      toast.error("The transcript could not be cleaned. Try again.");
+      toast.error("Could not clean transcripts automatically.");
       return false;
     } catch (err) {
-      toast.error(errorMessage(err, "Could not clean the transcript."));
+      toast.error(friendlyAiError(err, "Could not clean the transcript."));
       return false;
     } finally {
       setCleaning(false);
     }
+  }
+
+  function relabelGenericLines(name: string) {
+    setTranscripts((prev) =>
+      prev.map((t) => (isGenericRemote(t.speaker) ? { ...t, speaker: name } : t)),
+    );
+  }
+
+  async function persistGenericRelabel(name: string): Promise<string | null> {
+    const ids = transcripts.filter((t) => isGenericRemote(t.speaker)).map((t) => t.id);
+    if (ids.length === 0) return null;
+    const { error } = await supabase.from("transcripts").update({ speaker: name }).in("id", ids);
+    return error ? error.message || "Could not update the transcript speakers." : null;
   }
 
   async function addParticipant(input: NewParticipantInput): Promise<boolean> {
@@ -125,9 +146,25 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
       return false;
     }
     if (participants.some((p) => isSameName(p.name, name))) {
-      toast.info(`${name} is already a participant.`);
+      toast.info(`${name} is already in the participants list.`);
       return false;
     }
+    const isHost = isSameName(name, hostName);
+    const generic =
+      isHost || isGenericRemote(name)
+        ? undefined
+        : participants.find((p) => isGenericRemote(p.name));
+    if (generic) {
+      return renameParticipant(generic, name, input.email);
+    }
+    const otherRemotes = participants.filter(
+      (p) => !isSameName(p.name, hostName) && p.role !== "host",
+    );
+    const relabel =
+      !isHost &&
+      !isGenericRemote(name) &&
+      otherRemotes.length === 0 &&
+      transcripts.some((t) => isGenericRemote(t.speaker));
     const { data: row, error } = await supabase
       .from("participants")
       .insert({
@@ -143,25 +180,47 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
       return false;
     }
     setParticipants((prev) => [...prev, row as Participant]);
+    if (relabel) {
+      relabelGenericLines(name);
+      const problem = await persistGenericRelabel(name);
+      if (problem) {
+        toast.error(problem);
+        await reload();
+        return true;
+      }
+      toast.success(`Added ${name} & updated all chat bubbles!`);
+      return true;
+    }
     toast.success(`Added ${name}.`);
     return true;
   }
 
-  /** Renames a participant and every transcript line attributed to the old name. */
-  async function renameParticipant(participant: Participant, newName: string) {
+  async function renameParticipant(
+    participant: Participant,
+    newName: string,
+    email?: string,
+  ): Promise<boolean> {
     const name = newName.trim();
-    if (!name || name === participant.name) return;
+    if (!name || name === participant.name) return false;
+    const wasGeneric = isGenericRemote(participant.name);
+    const patch: { name: string; role?: string; email?: string } = { name };
+    if (wasGeneric) patch.role = "participant";
+    if (email?.trim()) patch.email = email.trim();
     const pSnapshot = participants;
     const tSnapshot = transcripts;
-    setParticipants((prev) => prev.map((p) => (p.id === participant.id ? { ...p, name } : p)));
+    setParticipants((prev) => prev.map((p) => (p.id === participant.id ? { ...p, ...patch } : p)));
     setTranscripts((prev) =>
-      prev.map((t) => (t.speaker === participant.name ? { ...t, speaker: name } : t)),
+      prev.map((t) =>
+        t.speaker === participant.name || (wasGeneric && isGenericRemote(t.speaker))
+          ? { ...t, speaker: name }
+          : t,
+      ),
     );
     const pProblem = mutationError(
-      await supabase.from("participants").update({ name }).eq("id", participant.id).select("id"),
+      await supabase.from("participants").update(patch).eq("id", participant.id).select("id"),
       "Could not rename the participant.",
     );
-    // A participant may have no transcript lines yet, so zero rows is fine here.
+
     const { error: tErr } = pProblem
       ? { error: null }
       : await supabase
@@ -169,14 +228,16 @@ export function useMeetingTranscriptEdits(data: MeetingData) {
           .update({ speaker: name })
           .eq("meeting_id", meetingId)
           .eq("speaker", participant.name);
-    if (pProblem || tErr) {
+    const gProblem = pProblem || tErr || !wasGeneric ? null : await persistGenericRelabel(name);
+    if (pProblem || tErr || gProblem) {
       setParticipants(pSnapshot);
       setTranscripts(tSnapshot);
-      toast.error(pProblem || tErr?.message || "Could not rename the participant.");
-      if (tErr) await reload();
-      return;
+      toast.error(pProblem || tErr?.message || gProblem || "Could not rename the participant.");
+      if (tErr || gProblem) await reload();
+      return false;
     }
-    toast.success(`Renamed ${participant.name} to ${name}.`);
+    toast.success(`Renamed ${participant.name} to ${name} across all chat bubbles!`);
+    return true;
   }
 
   async function removeParticipant(participant: Participant) {

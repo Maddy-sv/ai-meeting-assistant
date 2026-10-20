@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   CalendarPlus,
   FolderKanban,
-  ListChecks,
   Loader2,
   Pencil,
   Sparkles,
@@ -14,7 +13,6 @@ import {
   Video,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   ConfirmDialog,
@@ -26,8 +24,9 @@ import {
   StatusBadge,
 } from "@/components/layout";
 import { ProjectFormDialog } from "@/components/projects/project-form-dialog";
+import { ProjectSummaryReportView } from "@/components/projects/project-summary-report";
 import { ScheduleMeetingDialog } from "@/components/schedule/schedule-meeting-dialog";
-import { generateProjectSummary } from "@/lib/ai.functions";
+import { generateProjectSummary, type ProjectSummaryReport } from "@/lib/ai.functions";
 import { platformLabel } from "@/lib/format";
 import { dataKeys, deleteProject, getProject, listProjectMeetings, updateProject } from "@/lib/rpc";
 
@@ -36,12 +35,6 @@ export const Route = createFileRoute("/_authenticated/projects/$id")({
   component: ProjectPage,
 });
 
-interface ProjectSummary {
-  progress_report: string;
-  suggested_agenda: string[];
-  ai_enhanced?: boolean;
-}
-
 function ProjectPage() {
   const { id } = Route.useParams();
   const navigate = Route.useNavigate();
@@ -49,7 +42,7 @@ function ProjectPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [summary, setSummary] = useState<ProjectSummary | null>(null);
+  const [summary, setSummary] = useState<ProjectSummaryReport | null>(null);
 
   const project = useQuery({ queryKey: dataKeys.project(id), queryFn: () => getProject(id) });
   const meetings = useQuery({
@@ -80,13 +73,11 @@ function ProjectPage() {
   async function generate() {
     setGenerating(true);
     try {
-      const result = (await generateProjectSummary({ data: { projectId: id } })) as ProjectSummary;
-      setSummary({
-        progress_report: result.progress_report ?? "",
-        suggested_agenda: Array.isArray(result.suggested_agenda) ? result.suggested_agenda : [],
-        ai_enhanced: result.ai_enhanced,
-      });
-      toast.success("Project summary ready.");
+      const result = await generateProjectSummary({ data: { projectId: id } });
+      setSummary(result);
+      toast.success(
+        result.ai_enhanced ? "Project summary ready." : "Project summary built from saved records.",
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not generate the summary.");
     } finally {
@@ -183,8 +174,8 @@ function ProjectPage() {
 
       <Section
         card
-        title="Cumulative summary"
-        description="Progress, open commitments and a suggested agenda built from every meeting in this project."
+        title="Project summary"
+        description="A detailed report built only from this project's saved meetings, summaries, decisions and tasks."
         actions={
           <Button
             variant="brand"
@@ -212,37 +203,8 @@ function ProjectPage() {
           <LoadingState variant="list" rows={2} label="Generating summary…" />
         )}
         {summary && (
-          <div className="grid gap-6 md:grid-cols-2" aria-live="polite">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-semibold">Progress</h3>
-                <Badge variant={summary.ai_enhanced ? "info" : "muted"}>
-                  {summary.ai_enhanced ? "AI-enhanced" : "From saved records"}
-                </Badge>
-              </div>
-              <p className="whitespace-pre-wrap text-sm text-muted-foreground">
-                {summary.progress_report || "No progress recorded yet."}
-              </p>
-            </div>
-            <div className="space-y-2">
-              <h3 className="flex items-center gap-2 font-semibold">
-                <ListChecks className="h-4 w-4 text-primary" aria-hidden /> Suggested agenda
-              </h3>
-              {summary.suggested_agenda.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No agenda items suggested.</p>
-              ) : (
-                <ol className="space-y-2">
-                  {summary.suggested_agenda.map((item, i) => (
-                    <li key={i} className="flex gap-3 text-sm">
-                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary/15 text-xs font-bold text-primary">
-                        {i + 1}
-                      </span>
-                      <span className="pt-0.5 text-muted-foreground">{item}</span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </div>
+          <div className={generating ? "opacity-60" : undefined} aria-busy={generating}>
+            <ProjectSummaryReportView report={summary} />
           </div>
         )}
       </Section>

@@ -4,7 +4,6 @@ type DocumentPiP = {
   requestWindow: (opts: { width: number; height: number }) => Promise<Window>;
 };
 
-/** Copies the app's stylesheets into the floating window so token classes work there. */
 function copyStyles(target: Window) {
   const doc = target.document;
   document.querySelectorAll('style, link[rel="stylesheet"]').forEach((node) => {
@@ -16,10 +15,6 @@ function copyStyles(target: Window) {
   doc.title = "Live transcript";
 }
 
-/**
- * Opens an always-on-top window (Document Picture-in-Picture in Chromium, a small
- * popup elsewhere) that React content can be portalled into.
- */
 export function usePictureInPicture() {
   const [pipWindow, setPipWindow] = useState<Window | null>(null);
 
@@ -42,7 +37,6 @@ export function usePictureInPicture() {
       if (docPip?.requestWindow) {
         win = await docPip.requestWindow({ width: 400, height: 560 });
       } else {
-        // A same-origin blank popup; it needs a handle, so noopener cannot be used here.
         win = window.open("", "meeting_live_overlay", "width=400,height=560,resizable=yes");
       }
     } catch {

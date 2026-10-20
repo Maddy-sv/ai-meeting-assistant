@@ -1,10 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { format, isToday } from "date-fns";
 import {
-  Activity,
-  AlertTriangle,
   ArrowRight,
+  CalendarDays,
   CheckCircle2,
   FileText,
   ListChecks,
@@ -12,7 +11,6 @@ import {
   UserCheck,
   Users,
   Video,
-  Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +26,7 @@ import {
 import { adminListMeetings, adminListUsers, adminOverview } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/admin/dashboard")({
-  head: () => ({ meta: [{ title: "Admin overview — AI Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "Admin Control Center — AI Powered Meeting Companion" }] }),
   component: AdminDashboard,
 });
 
@@ -44,19 +42,22 @@ function AdminDashboard() {
   const recentMeetings = [...(meetings.data ?? [])]
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
     .slice(0, 5);
+  const meetingsToday = (meetings.data ?? []).filter((m) =>
+    isToday(new Date(m.scheduled_at ?? m.created_at)),
+  ).length;
 
   return (
     <div className="space-y-8">
       <PageHeader
         eyebrow="Administration"
-        title="Admin overview"
+        title="Admin Control Center"
         description="Live totals across every workspace."
       />
 
       {overview.isError ? (
         <ErrorState message={overview.error.message} onRetry={() => overview.refetch()} />
       ) : (
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
           <StatTile
             label="Users"
             icon={Users}
@@ -70,6 +71,12 @@ function AdminDashboard() {
             loading={overview.isLoading}
             value={o?.meetings ?? 0}
             hint={o ? `${o.meetings_completed} completed` : undefined}
+          />
+          <StatTile
+            label="Meetings today"
+            icon={CalendarDays}
+            loading={meetings.isLoading}
+            value={meetings.isError ? "—" : meetingsToday}
           />
           <StatTile
             label="Transcripts"
@@ -88,25 +95,6 @@ function AdminDashboard() {
             icon={ListChecks}
             loading={overview.isLoading}
             value={o?.action_items ?? 0}
-          />
-          <StatTile
-            label="AI requests"
-            icon={Zap}
-            loading={overview.isLoading}
-            value={o?.ai_requests ?? 0}
-            hint="All time"
-          />
-          <StatTile
-            label="AI today"
-            icon={Activity}
-            loading={overview.isLoading}
-            value={o?.ai_requests_today ?? 0}
-          />
-          <StatTile
-            label="AI failures today"
-            icon={AlertTriangle}
-            loading={overview.isLoading}
-            value={o?.ai_failures_today ?? 0}
           />
         </div>
       )}

@@ -1,8 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { buildVerifiedCumulativeSummary, resolveDeadlineToISODate } from "./continuous-memory";
-import { parseJson } from "@/server/ai/gemini";
+import {
+  buildVerifiedCumulativeSummary,
+  evidenceSupported,
+  resolveDeadlineToISODate,
+  resolveTaskAssignee,
+  safeFormatDeadline,
+} from "./continuous-memory";
+import { AiQuotaError, parseJson } from "@/server/ai/gemini";
 import { generateForUser } from "@/server/ai/usage";
 import {
   CLEAN_SCHEMA,
@@ -35,16 +41,18 @@ import {
   fail,
   getHostName,
   getParticipantNames,
+  jsonStrings,
   replaceDecisions,
   requireOwnedMeeting,
   saveExtractedActionItems,
   type ActionItemRow,
   type DecisionRow,
 } from "@/server/meetings";
-
-// ---------------------------------------------------------------------------
-// Shared schemas for AI output
-// ---------------------------------------------------------------------------
+import {
+  reconcileAfterMeeting,
+  reconcileTaskProgress,
+  type TaskProgressResult,
+} from "@/server/task-progress";
 
 const str = (max: number) => z.string().trim().max(max);
 const nullableStr = (max: number) =>
@@ -89,9 +97,16 @@ const aiSummary = z.object({
     .transform((a) => a ?? []),
 });
 
+const aiExtractedItem = aiActionItem.extend({
+  evidence: z
+    .string()
+    .nullish()
+    .transform((v) => (v ?? "").trim().slice(0, 200)),
+});
+
 const aiExtraction = z.object({
   action_items: z
-    .array(aiActionItem)
+    .array(aiExtractedItem)
     .nullish()
     .transform((a) => a ?? []),
   decisions: z
@@ -109,6 +124,31 @@ function parseAi<S extends z.ZodTypeAny>(schema: S, text: string): z.output<S> {
   return result.data;
 }
 
+type ExtractedItem = {
+  title: string;
+  assignee: string | null;
+  deadline: string | null;
+  status?: string | null;
+};
+
+function withTaskDefaults(
+  items: ExtractedItem[],
+  followUps: string[],
+  hostName: string,
+  participants: string[],
+): ExtractedItem[] {
+  const source =
+    items.length > 0
+      ? items
+      : followUps.map((title) => ({ title: title.slice(0, 500), assignee: null, deadline: null }));
+  return source
+    .filter((a) => a.title.trim())
+    .map((a) => ({
+      ...a,
+      assignee: resolveTaskAssignee(a.assignee, hostName, participants) ?? hostName,
+    }));
+}
+
 type SummaryPayload = {
   executive_summary: string;
   key_points: string[];
@@ -117,10 +157,6 @@ type SummaryPayload = {
   action_items: { title: string; assignee: string | null; deadline: string | null }[];
   decisions: { description: string; made_by: string | null }[];
 };
-
-// ---------------------------------------------------------------------------
-// summarizeMeeting
-// ---------------------------------------------------------------------------
 
 const SummarizeInput = z.object({
   meetingId: uuid,
@@ -154,23 +190,36 @@ export const summarizeMeeting = createServerFn({ method: "POST" })
       getParticipantNames(supabase, meeting.id),
     ]);
 
-    const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [
-      { text: summaryPrompt({ title: meeting.title, hostName, participants, transcript }) },
-    ];
-    for (const shot of data.screenshots ?? []) {
+    const textPart = {
+      text: summaryPrompt({ title: meeting.title, hostName, participants, transcript }),
+    };
+    const imageParts = (data.screenshots ?? []).map((shot) => {
       const { mimeType, data: b64 } = splitBase64(shot);
-      parts.push({ inlineData: { data: b64, mimeType: mimeType ?? "image/jpeg" } });
-    }
-
-    const res = await generateForUser(supabase, userId, "summarizeMeeting", {
-      contents: [{ role: "user", parts }],
-      config: {
-        systemInstruction: SUMMARY_SYSTEM,
-        responseMimeType: "application/json",
-        responseSchema: SUMMARY_SCHEMA,
-        temperature: 0.2,
-      },
+      return { inlineData: { data: b64, mimeType: mimeType ?? "image/jpeg" } };
     });
+    const summaryConfig = {
+      systemInstruction: SUMMARY_SYSTEM,
+      responseMimeType: "application/json",
+      responseSchema: SUMMARY_SCHEMA,
+      temperature: 0.2,
+    };
+
+    let res;
+    try {
+      res = await generateForUser(supabase, userId, "summarizeMeeting", {
+        contents: [{ role: "user", parts: [textPart, ...imageParts] }],
+        config: summaryConfig,
+      });
+    } catch (err) {
+      if (!(err instanceof AiQuotaError) || imageParts.length === 0) throw err;
+      console.warn(
+        "[ai] summary with screenshots hit the quota, retrying with the transcript only",
+      );
+      res = await generateForUser(supabase, userId, "summarizeMeeting", {
+        contents: [{ role: "user", parts: [textPart] }],
+        config: summaryConfig,
+      });
+    }
     const parsed = parseAi(aiSummary, res.text);
     if (!parsed.executive_summary) {
       throw new Error("The AI returned an empty summary. Please try again.");
@@ -188,10 +237,14 @@ export const summarizeMeeting = createServerFn({ method: "POST" })
     );
     if (sumErr) fail("save summary", sumErr, "Could not save the summary.");
 
-    const savedItems = await saveExtractedActionItems(supabase, meeting, parsed.action_items, {
-      hostName,
-    });
+    const savedItems = await saveExtractedActionItems(
+      supabase,
+      meeting,
+      withTaskDefaults(parsed.action_items, parsed.follow_ups, hostName, participants),
+      { hostName },
+    );
     await replaceDecisions(supabase, meeting.id, parsed.decisions);
+    await reconcileAfterMeeting(supabase, userId, meeting.id);
 
     const { error: notifErr } = await supabase.from("notifications").insert({
       user_id: userId,
@@ -200,7 +253,7 @@ export const summarizeMeeting = createServerFn({ method: "POST" })
       body: parsed.executive_summary.slice(0, 280),
       link: `/meetings/${meeting.id}`,
     });
-    // The summary itself is saved; a missing notification is logged, not fatal.
+
     if (notifErr) console.error("[db] summary notification:", notifErr.message);
 
     return {
@@ -217,10 +270,6 @@ export const summarizeMeeting = createServerFn({ method: "POST" })
     };
   });
 
-// ---------------------------------------------------------------------------
-// syncMeetingActionItems
-// ---------------------------------------------------------------------------
-
 const MeetingIdInput = z.object({ meetingId: uuid });
 
 export const syncMeetingActionItems = createServerFn({ method: "POST" })
@@ -234,8 +283,9 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
       const { supabase, userId } = context;
       const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
 
-      const [hostName, segsRes, summaryRes] = await Promise.all([
+      const [hostName, participants, segsRes, summaryRes] = await Promise.all([
         getHostName(supabase, userId),
+        getParticipantNames(supabase, meeting.id),
         supabase
           .from("transcripts")
           .select("speaker, content")
@@ -243,7 +293,7 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
           .order("segment_index", { ascending: true }),
         supabase
           .from("ai_summaries")
-          .select("executive_summary, key_points")
+          .select("executive_summary, key_points, follow_ups")
           .eq("meeting_id", meeting.id)
           .maybeSingle(),
       ]);
@@ -252,11 +302,8 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
 
       const transcript = transcriptText(segsRes.data);
       const summary = summaryRes.data?.executive_summary ?? "";
-      const keyPoints = Array.isArray(summaryRes.data?.key_points)
-        ? (summaryRes.data.key_points as unknown[]).filter(
-            (k): k is string => typeof k === "string",
-          )
-        : [];
+      const keyPoints = jsonStrings(summaryRes.data?.key_points);
+      const followUps = jsonStrings(summaryRes.data?.follow_ups);
       if (!transcript.trim() && !summary.trim()) {
         throw new Error("This meeting has no transcript or summary to extract tasks from.");
       }
@@ -270,6 +317,7 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
                 text: extractionPrompt({
                   title: meeting.title,
                   hostName,
+                  participants,
                   summary,
                   keyPoints,
                   transcript,
@@ -286,25 +334,54 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
         },
       });
       const parsed = parseAi(aiExtraction, res.text);
+      const recordsText = `${transcript}\n${summary}\n${keyPoints.join("\n")}`;
+      const supported = parsed.action_items.filter(
+        (a) => a.title && evidenceSupported(a.evidence, recordsText),
+      );
+      if (supported.length < parsed.action_items.length) {
+        console.warn(
+          `[ai] dropped ${parsed.action_items.length - supported.length} task(s) without supporting evidence`,
+        );
+      }
 
-      const action_items = await saveExtractedActionItems(supabase, meeting, parsed.action_items, {
-        hostName,
-        evidenceText: `${transcript}\n${summary}\n${keyPoints.join("\n")}`,
-      });
+      const action_items = await saveExtractedActionItems(
+        supabase,
+        meeting,
+        withTaskDefaults(
+          supported.map(({ evidence: _evidence, ...item }) => item),
+          parsed.action_items.length > 0 ? [] : followUps,
+          hostName,
+          participants,
+        ),
+        { hostName, evidenceText: recordsText },
+      );
       const decisions = await replaceDecisions(supabase, meeting.id, parsed.decisions);
-      return { action_items, decisions };
+      const progress = await reconcileAfterMeeting(supabase, userId, meeting.id);
+      if (!progress || progress.updated === 0) return { action_items, decisions };
+      const { data: refreshed, error: refreshErr } = await supabase
+        .from("action_items")
+        .select("*")
+        .eq("meeting_id", meeting.id)
+        .order("created_at", { ascending: true });
+      if (refreshErr)
+        fail("reload action items", refreshErr, "Could not load the meeting's tasks.");
+      return { action_items: refreshed ?? action_items, decisions };
     },
   );
-
-// ---------------------------------------------------------------------------
-// generateMeetingRecaps (no AI call: composes recap emails from saved data)
-// ---------------------------------------------------------------------------
 
 function assigneeNames(assignee: string | null): string[] {
   return (assignee ?? "")
     .split(/,|&|\band\b/i)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+}
+
+function isAssignedTo(assignee: string | null, participantName: string): boolean {
+  const full = participantName.trim().toLowerCase();
+  const first = full.split(/\s+/)[0];
+  return assigneeNames(assignee).some(
+    (n) => n === full || (first.length > 1 && n.split(/\s+/)[0] === first),
+  );
 }
 
 export const generateMeetingRecaps = createServerFn({ method: "POST" })
@@ -330,7 +407,7 @@ export const generateMeetingRecaps = createServerFn({ method: "POST" })
 
     return (participantsRes.data ?? []).map((p) => {
       const name = p.name.trim() || "Participant";
-      const mine = actions.filter((a) => assigneeNames(a.assignee).includes(name.toLowerCase()));
+      const mine = actions.filter((a) => isAssignedTo(a.assignee, name));
       const others = actions.filter((a) => !mine.includes(a));
       const due = (d: string | null) =>
         d ? new Date(d).toLocaleDateString("en-GB") : "no deadline";
@@ -360,16 +437,129 @@ export const generateMeetingRecaps = createServerFn({ method: "POST" })
     });
   });
 
-// ---------------------------------------------------------------------------
-// generateProjectSummary
-// ---------------------------------------------------------------------------
-
 const ProjectInput = z.object({ projectId: uuid });
+
+export interface ProjectTimelineEntry {
+  meeting_id: string;
+  title: string;
+  date: string;
+  status: string;
+  summary: string;
+  highlights: string[];
+}
+
+export interface ProjectDecisionEntry {
+  description: string;
+  made_by: string | null;
+  meeting_id: string | null;
+  meeting_title: string | null;
+  date: string | null;
+}
+
+export interface ProjectTaskEntry {
+  title: string;
+  assignee: string | null;
+  deadline: string | null;
+  status: string;
+  meeting_id: string | null;
+  meeting_title: string | null;
+}
+
+export interface ProjectSummaryReport {
+  overview: string;
+  progress_report: string;
+  stats: {
+    meetings: number;
+    completed_meetings: number;
+    tasks_total: number;
+    tasks_done: number;
+    tasks_open: number;
+    decisions: number;
+    participants: string[];
+  };
+  timeline: ProjectTimelineEntry[];
+  key_decisions: ProjectDecisionEntry[];
+  completed_tasks: ProjectTaskEntry[];
+  open_tasks: ProjectTaskEntry[];
+  risks: string[];
+  next_steps: string[];
+  suggested_agenda: string[];
+  discrepancies: string[];
+  ai_enhanced: boolean;
+  generated_at: string;
+}
+
+const aiProjectReport = z.object({
+  overview: z
+    .string()
+    .nullish()
+    .transform((s) => (s ?? "").trim()),
+  risks: strList(8),
+  next_steps: strList(10),
+  suggested_agenda: strList(6),
+});
+
+function dedupe(items: string[], limit: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const key = item
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function shortDate(iso: string | null): string {
+  if (!iso) return "date not recorded";
+  const d = new Date(iso);
+  return isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function taskLine(t: ProjectTaskEntry): string {
+  const owner = t.assignee ? `owner ${t.assignee}` : "no owner";
+  const due = t.deadline ? `due ${safeFormatDeadline(t.deadline)}` : "no deadline";
+  const from = t.meeting_title ? `; from "${t.meeting_title}"` : "";
+  return `${t.title} (${t.status.replace(/_/g, " ")}; ${owner}; ${due}${from})`;
+}
+
+function emptyProjectReport(overview: string): ProjectSummaryReport {
+  return {
+    overview,
+    progress_report: overview,
+    stats: {
+      meetings: 0,
+      completed_meetings: 0,
+      tasks_total: 0,
+      tasks_done: 0,
+      tasks_open: 0,
+      decisions: 0,
+      participants: [],
+    },
+    timeline: [],
+    key_decisions: [],
+    completed_tasks: [],
+    open_tasks: [],
+    risks: [],
+    next_steps: [],
+    suggested_agenda: [],
+    discrepancies: [],
+    ai_enhanced: false,
+    generated_at: new Date().toISOString(),
+  };
+}
 
 export const generateProjectSummary = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: z.input<typeof ProjectInput>) => parseInput(ProjectInput, input))
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data, context }): Promise<ProjectSummaryReport> => {
     const { supabase, userId } = context;
 
     const { data: project, error: pErr } = await supabase
@@ -380,31 +570,27 @@ export const generateProjectSummary = createServerFn({ method: "POST" })
     if (pErr) fail("load project", pErr, "Could not load the project.");
     if (!project || project.owner_id !== userId) throw new Error("Project not found.");
 
-    const { data: meetings, error: mErr } = await supabase
+    const { data: meetingRows, error: mErr } = await supabase
       .from("meetings")
-      .select("id, title, scheduled_at, created_at")
+      .select("id, title, status, scheduled_at, started_at, created_at")
       .eq("project_id", project.id)
-      .eq("host_id", userId)
-      .order("scheduled_at", { ascending: true, nullsFirst: false });
+      .eq("host_id", userId);
     if (mErr) fail("load project meetings", mErr, "Could not load the project's meetings.");
 
-    if (!meetings || meetings.length === 0) {
-      return {
-        progress_report: "No meetings found for this project yet.",
-        suggested_agenda: [] as string[],
-        verified_completed: [],
-        verified_pending: [],
-        verified_decisions: [],
-        conflicts: [],
-        ai_enhanced: false,
-      };
+    if (!meetingRows || meetingRows.length === 0) {
+      return emptyProjectReport("No meetings found for this project yet.");
     }
+
+    const meetings = meetingRows
+      .map((m) => ({ ...m, date: m.started_at ?? m.scheduled_at ?? m.created_at }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const byId = new Map(meetings.map((m) => [m.id, m]));
 
     const ids = meetings.map((m) => m.id);
     const [summaries, actions, decisions, transcripts, participants] = await Promise.all([
       supabase
         .from("ai_summaries")
-        .select("meeting_id, executive_summary, key_points")
+        .select("meeting_id, executive_summary, key_points, risks, follow_ups")
         .in("meeting_id", ids),
       supabase.from("action_items").select("*").in("meeting_id", ids),
       supabase.from("decisions").select("*").in("meeting_id", ids),
@@ -415,76 +601,205 @@ export const generateProjectSummary = createServerFn({ method: "POST" })
       if (r.error) fail("load project records", r.error, "Could not load the project's records.");
     }
 
+    const participantNames = dedupe(
+      (participants.data ?? []).map((p) => p.name.trim()).filter(Boolean),
+      100,
+    );
+
     const verified = buildVerifiedCumulativeSummary(
       { id: project.id, name: project.name },
-      meetings.map((m) => ({ ...m, scheduled_at: m.scheduled_at ?? m.created_at })),
+      meetings.map((m) => ({ id: m.id, title: m.title, scheduled_at: m.date })),
       summaries.data ?? [],
       actions.data ?? [],
       decisions.data ?? [],
       transcripts.data ?? [],
-      (participants.data ?? []).map((p) => p.name),
+      participantNames,
     );
 
-    const base = {
-      progress_report: verified.progress_report,
-      suggested_agenda: verified.suggested_agenda,
-      verified_completed: verified.verified_completed,
-      verified_pending: verified.verified_pending,
-      verified_decisions: verified.verified_decisions,
-      conflicts: verified.conflicts,
-    };
-
-    const res = await generateForUser(supabase, userId, "generateProjectSummary", {
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: projectPrompt({
-                verifiedReport: verified.progress_report,
-                pending:
-                  verified.verified_pending
-                    .map(
-                      (t) =>
-                        `- [${t.status}] ${t.title} (${t.assignee ?? "unassigned"}, due ${t.deadline ?? "not set"})`,
-                    )
-                    .join("\n") || "None",
-              }),
-            },
-          ],
-        },
-      ],
-      config: {
-        systemInstruction: PROJECT_SYSTEM,
-        responseMimeType: "application/json",
-        responseSchema: PROJECT_SCHEMA,
-        temperature: 0.2,
-      },
+    const summaryByMeeting = new Map((summaries.data ?? []).map((s) => [s.meeting_id, s]));
+    const timeline: ProjectTimelineEntry[] = meetings.map((m) => {
+      const s = summaryByMeeting.get(m.id);
+      return {
+        meeting_id: m.id,
+        title: m.title,
+        date: m.date,
+        status: m.status,
+        summary: s?.executive_summary?.trim() ?? "",
+        highlights: jsonStrings(s?.key_points),
+      };
     });
-    const parsed = parseAi(
-      z.object({
-        progress_report: z.string().trim(),
-        suggested_agenda: strList(5),
-      }),
-      res.text,
-    );
-    if (!parsed.progress_report) {
-      throw new Error("The AI returned an empty project summary. Please try again.");
-    }
 
-    return {
-      ...base,
-      progress_report: parsed.progress_report,
-      suggested_agenda: parsed.suggested_agenda.length
-        ? parsed.suggested_agenda
-        : base.suggested_agenda,
-      ai_enhanced: true,
+    const key_decisions: ProjectDecisionEntry[] = verified.verified_decisions.map((d) => {
+      const m = d.meeting_id ? byId.get(d.meeting_id) : undefined;
+      return {
+        description: d.description,
+        made_by: d.made_by?.trim() || null,
+        meeting_id: m?.id ?? null,
+        meeting_title: m?.title ?? null,
+        date: m?.date ?? null,
+      };
+    });
+
+    const toTask = (t: (typeof verified.verified_pending)[number]): ProjectTaskEntry => {
+      const m = byId.get(t.origin_meeting_id);
+      return {
+        title: t.title,
+        assignee: t.assignee,
+        deadline: t.deadline,
+        status: t.status,
+        meeting_id: m?.id ?? null,
+        meeting_title: m?.title ?? null,
+      };
     };
-  });
+    const completed_tasks = verified.verified_completed.map(toTask);
+    const open_tasks = verified.verified_pending.map(toTask).sort((a, b) => {
+      const da = a.deadline ? (resolveDeadlineToISODate(a.deadline) ?? "9999") : "9999";
+      const db = b.deadline ? (resolveDeadlineToISODate(b.deadline) ?? "9999") : "9999";
+      return da.localeCompare(db);
+    });
 
-// ---------------------------------------------------------------------------
-// askChatBot
-// ---------------------------------------------------------------------------
+    const discrepancies = verified.conflicts.map((c) => {
+      const evidence = c.evidence.map((e) => `${e.source}: ${e.value ?? "none"}`).join(" vs ");
+      return evidence ? `${c.description} (${evidence})` : c.description;
+    });
+
+    const stats: ProjectSummaryReport["stats"] = {
+      meetings: meetings.length,
+      completed_meetings: meetings.filter((m) => m.status === "completed").length,
+      tasks_total: completed_tasks.length + open_tasks.length,
+      tasks_done: completed_tasks.length,
+      tasks_open: open_tasks.length,
+      decisions: key_decisions.length,
+      participants: participantNames,
+    };
+
+    const recordedRisks = dedupe(
+      (summaries.data ?? []).flatMap((s) => jsonStrings(s.risks)),
+      8,
+    );
+    const recordedFollowUps = (summaries.data ?? []).flatMap((s) => jsonStrings(s.follow_ups));
+    const fallbackNextSteps = dedupe(
+      [
+        ...open_tasks.map((t) => {
+          const owner = t.assignee ? ` (${t.assignee}` : " (unassigned";
+          const due = t.deadline ? `, due ${safeFormatDeadline(t.deadline)})` : ")";
+          return `${t.title}${owner}${due}`;
+        }),
+        ...recordedFollowUps,
+      ],
+      10,
+    );
+
+    const latest = [...timeline].reverse().find((t) => t.summary);
+    const overviewParts = [
+      `${project.name} has ${stats.meetings} recorded meeting${stats.meetings === 1 ? "" : "s"} (${stats.completed_meetings} completed), from ${shortDate(meetings[0].date)} to ${shortDate(meetings[meetings.length - 1].date)}.`,
+      stats.tasks_total > 0
+        ? `${stats.tasks_done} of ${stats.tasks_total} task${stats.tasks_total === 1 ? " is" : "s are"} done and ${stats.tasks_open} remain${stats.tasks_open === 1 ? "s" : ""} open${open_tasks.some((t) => !t.assignee) ? `, ${open_tasks.filter((t) => !t.assignee).length} without an owner` : ""}.`
+        : "No tasks have been recorded yet.",
+      stats.decisions > 0
+        ? `${stats.decisions} decision${stats.decisions === 1 ? " has" : "s have"} been recorded.`
+        : "",
+      latest ? `Latest summary ("${latest.title}"): ${latest.summary}` : "",
+      discrepancies.length > 0
+        ? `${discrepancies.length} discrepanc${discrepancies.length === 1 ? "y needs" : "ies need"} checking.`
+        : "",
+    ];
+    const fallbackOverview = overviewParts.filter(Boolean).join(" ");
+
+    const base: ProjectSummaryReport = {
+      overview: fallbackOverview,
+      progress_report: fallbackOverview,
+      stats,
+      timeline,
+      key_decisions,
+      completed_tasks,
+      open_tasks,
+      risks: recordedRisks,
+      next_steps: fallbackNextSteps,
+      suggested_agenda: verified.suggested_agenda,
+      discrepancies,
+      ai_enhanced: false,
+      generated_at: new Date().toISOString(),
+    };
+
+    const hasRecords =
+      timeline.some((t) => t.summary || t.highlights.length) ||
+      stats.tasks_total > 0 ||
+      stats.decisions > 0;
+    if (!hasRecords) return base;
+
+    const records = timeline
+      .map((t) => {
+        const s = summaryByMeeting.get(t.meeting_id);
+        const ds = key_decisions.filter((d) => d.meeting_id === t.meeting_id);
+        const lines = [`MEETING "${t.title}" (${shortDate(t.date)}, ${t.status})`];
+        lines.push(`Summary: ${t.summary ? t.summary.slice(0, 2000) : "not generated"}`);
+        if (t.highlights.length) lines.push(`Key points: ${t.highlights.join(" | ")}`);
+        const risks = jsonStrings(s?.risks);
+        if (risks.length) lines.push(`Risks: ${risks.join(" | ")}`);
+        const follow = jsonStrings(s?.follow_ups);
+        if (follow.length) lines.push(`Follow-ups: ${follow.join(" | ")}`);
+        if (ds.length) {
+          lines.push(
+            `Decisions: ${ds.map((d) => `${d.description}${d.made_by ? ` (by ${d.made_by})` : ""}`).join(" | ")}`,
+          );
+        }
+        return lines.join("\n");
+      })
+      .join("\n\n");
+
+    const tasks = [
+      "COMPLETED TASKS:",
+      ...(completed_tasks.length ? completed_tasks.map((t) => `- ${taskLine(t)}`) : ["- none"]),
+      "",
+      "OPEN TASKS:",
+      ...(open_tasks.length ? open_tasks.map((t) => `- ${taskLine(t)}`) : ["- none"]),
+      "",
+      "DISCREPANCIES:",
+      ...(discrepancies.length ? discrepancies.map((d) => `- ${d}`) : ["- none"]),
+    ].join("\n");
+
+    const facts = [
+      `Meetings: ${stats.meetings} (${stats.completed_meetings} completed)`,
+      `Tasks: ${stats.tasks_total} total, ${stats.tasks_done} done, ${stats.tasks_open} open`,
+      `Decisions: ${stats.decisions}`,
+      `Participants: ${participantNames.join(", ") || "not recorded"}`,
+      `Today: ${shortDate(new Date().toISOString())}`,
+    ].join("\n");
+
+    try {
+      const res = await generateForUser(supabase, userId, "generateProjectSummary", {
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: projectPrompt({ projectName: project.name, facts, records, tasks }) }],
+          },
+        ],
+        config: {
+          systemInstruction: PROJECT_SYSTEM,
+          responseMimeType: "application/json",
+          responseSchema: PROJECT_SCHEMA,
+          temperature: 0.2,
+        },
+      });
+      const parsed = parseAi(aiProjectReport, res.text);
+      if (!parsed.overview) return base;
+      return {
+        ...base,
+        overview: parsed.overview,
+        progress_report: parsed.overview,
+        risks: parsed.risks.length ? dedupe(parsed.risks, 8) : base.risks,
+        next_steps: parsed.next_steps.length ? dedupe(parsed.next_steps, 10) : base.next_steps,
+        suggested_agenda: parsed.suggested_agenda.length
+          ? dedupe(parsed.suggested_agenda, 6)
+          : base.suggested_agenda,
+        ai_enhanced: true,
+      };
+    } catch (err) {
+      console.warn("[ai] project summary fell back to the verified report:", err);
+      return base;
+    }
+  });
 
 const ChatInput = z.object({ message: str(4000).min(1, "Message is empty") });
 const CHAT_HISTORY_LIMIT = 20;
@@ -599,10 +914,6 @@ export const askChatBot = createServerFn({ method: "POST" })
     return { reply };
   });
 
-// ---------------------------------------------------------------------------
-// transcribeRemoteAudio
-// ---------------------------------------------------------------------------
-
 const AUDIO_TYPES = [
   "audio/webm",
   "audio/ogg",
@@ -619,16 +930,64 @@ const TranscribeInput = z.object({
   segmentIndex: z.number().int().min(0).max(1_000_000),
   screenshotBase64: base64Field(MAX_SCREENSHOT_BYTES, "Screenshot").optional(),
   knownParticipants: z.array(str(100)).max(50).optional(),
-  /** Ignored: the host name always comes from the caller's profile. */
+
   hostName: z.string().max(200).optional(),
 });
 
-const PLACEHOLDER_SPEAKERS = new Set(["remote", "remote participant", "unknown", "speaker"]);
+const REMOTE_PARTICIPANT_LABEL = "Remote Participant";
+const PLACEHOLDER_SPEAKERS = new Set([
+  "remote",
+  "remote participant",
+  "remote speaker",
+  "unknown",
+  "unknown speaker",
+  "speaker",
+  "participant",
+]);
+const SELF_SPEAKERS = new Set(["you", "host", "me"]);
+
+function isPlaceholderSpeaker(name: string | null | undefined): boolean {
+  return PLACEHOLDER_SPEAKERS.has((name ?? "").trim().toLowerCase());
+}
+
+type Client = Parameters<typeof requireOwnedMeeting>[0];
+
+async function relabelPlaceholderLines(
+  supabase: Client,
+  meetingId: string,
+  name: string,
+): Promise<number> {
+  const { data: rows, error } = await supabase
+    .from("transcripts")
+    .select("id, speaker")
+    .eq("meeting_id", meetingId);
+  if (error) fail("load transcript speakers", error, "Could not update the transcript speakers.");
+  const ids = (rows ?? []).filter((r) => isPlaceholderSpeaker(r.speaker)).map((r) => r.id);
+  if (ids.length === 0) return 0;
+  const { error: upErr } = await supabase
+    .from("transcripts")
+    .update({ speaker: name })
+    .in("id", ids);
+  if (upErr) fail("relabel transcript", upErr, "Could not update the transcript speakers.");
+  return ids.length;
+}
+
+export type RemoteTranscription = {
+  segments: Array<{
+    meeting_id: string;
+    speaker: string;
+    content: string;
+    segment_index: number;
+    spoken_at: string;
+    status: "partial";
+  }>;
+  renamed: { from: string; to: string } | null;
+};
 
 export const transcribeRemoteAudio = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: z.input<typeof TranscribeInput>) => parseInput(TranscribeInput, input))
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data, context }): Promise<RemoteTranscription | null> => {
     const { supabase, userId } = context;
     const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
     const [hostName, existingNames] = await Promise.all([
@@ -665,47 +1024,74 @@ export const transcribeRemoteAudio = createServerFn({ method: "POST" })
     );
     const segments = parsed
       .map((s) => ({
-        speaker: (s.speaker ?? "").trim().slice(0, 100) || "Remote Participant",
+        speaker: (s.speaker ?? "").trim().slice(0, 100) || REMOTE_PARTICIPANT_LABEL,
         content: (s.text ?? "").trim().slice(0, 5000),
       }))
       .filter((s) => s.content.length > 1);
     if (segments.length === 0) return null;
 
-    // Register newly identified named speakers as participants.
+    const isHostName = (name: string) => name.toLowerCase() === hostName.toLowerCase();
     const known = new Set(existingNames.map((n) => n.toLowerCase()));
     const newNames: string[] = [];
     for (const s of segments) {
       const key = s.speaker.toLowerCase();
-      if (!known.has(key) && !PLACEHOLDER_SPEAKERS.has(key)) {
+      if (!known.has(key) && !PLACEHOLDER_SPEAKERS.has(key) && !SELF_SPEAKERS.has(key)) {
         known.add(key);
         newNames.push(s.speaker);
       }
     }
+
+    let renamed: RemoteTranscription["renamed"] = null;
+    const firstRemote = newNames.find((n) => !isHostName(n));
+    if (firstRemote) {
+      const { data: rows, error: pErr } = await supabase
+        .from("participants")
+        .select("id, name")
+        .eq("meeting_id", meeting.id);
+      if (pErr) fail("load participants", pErr, "Could not load the meeting participants.");
+      const generic = (rows ?? []).find((p) => isPlaceholderSpeaker(p.name));
+      const realRemotes = (rows ?? []).filter(
+        (p) => !isPlaceholderSpeaker(p.name) && !isHostName(p.name),
+      );
+      if (generic) {
+        const { error } = await supabase
+          .from("participants")
+          .update({ name: firstRemote, role: "participant" })
+          .eq("id", generic.id);
+        if (error) fail("rename participant", error, "Could not rename the remote participant.");
+        await relabelPlaceholderLines(supabase, meeting.id, firstRemote);
+        renamed = { from: generic.name, to: firstRemote };
+        newNames.splice(newNames.indexOf(firstRemote), 1);
+      } else if (realRemotes.length === 0) {
+        const count = await relabelPlaceholderLines(supabase, meeting.id, firstRemote);
+        if (count > 0) renamed = { from: REMOTE_PARTICIPANT_LABEL, to: firstRemote };
+      }
+    }
+
     if (newNames.length > 0) {
       const { error } = await supabase.from("participants").insert(
         newNames.map((name) => ({
           meeting_id: meeting.id,
           name,
-          role: name.toLowerCase() === hostName.toLowerCase() ? "host" : "participant",
+          role: isHostName(name) ? "host" : "participant",
         })),
       );
       if (error) fail("add participants", error, "Could not save the new participants.");
     }
 
     const spokenAt = new Date().toISOString();
-    return segments.map((s) => ({
-      meeting_id: meeting.id,
-      speaker: s.speaker,
-      content: s.content,
-      segment_index: data.segmentIndex,
-      spoken_at: spokenAt,
-      status: "partial" as const,
-    }));
+    return {
+      renamed,
+      segments: segments.map((s) => ({
+        meeting_id: meeting.id,
+        speaker: renamed && isPlaceholderSpeaker(s.speaker) ? renamed.to : s.speaker,
+        content: s.content,
+        segment_index: data.segmentIndex,
+        spoken_at: spokenAt,
+        status: "partial" as const,
+      })),
+    };
   });
-
-// ---------------------------------------------------------------------------
-// cleanAndAlignTranscripts
-// ---------------------------------------------------------------------------
 
 const CleanInput = z.object({
   meetingId: uuid,
@@ -767,7 +1153,6 @@ export const cleanAndAlignTranscripts = createServerFn({ method: "POST" })
       );
     }
 
-    // Keep the original timing: map each cleaned line onto the old timeline.
     const old = oldSegs ?? [];
     const now = new Date().toISOString();
     const toInsert = cleaned.map((c, i) => ({
@@ -778,7 +1163,6 @@ export const cleanAndAlignTranscripts = createServerFn({ method: "POST" })
       spoken_at: old.length ? old[Math.floor((i * old.length) / cleaned.length)].spoken_at : now,
     }));
 
-    // Insert the new transcript first, then remove the old rows by id.
     const { data: inserted, error: insErr } = await supabase
       .from("transcripts")
       .insert(toInsert)
@@ -809,12 +1193,38 @@ export const cleanAndAlignTranscripts = createServerFn({ method: "POST" })
       }
     }
 
-    return { success: true as const, transcripts: inserted ?? [] };
-  });
+    const knownNames = new Set(participants.map((n) => n.toLowerCase()));
+    const hasNamedRemote = participants.some(
+      (n) =>
+        n.toLowerCase() !== hostName.toLowerCase() && !PLACEHOLDER_SPEAKERS.has(n.toLowerCase()),
+    );
+    const addedSpeakers: string[] = [];
+    for (const c of cleaned) {
+      const key = c.speaker.toLowerCase();
+      if (knownNames.has(key) || SELF_SPEAKERS.has(key)) continue;
+      if (PLACEHOLDER_SPEAKERS.has(key) && (key !== "remote participant" || hasNamedRemote))
+        continue;
+      knownNames.add(key);
+      addedSpeakers.push(c.speaker);
+    }
+    if (addedSpeakers.length > 0) {
+      const { error: pErr } = await supabase.from("participants").insert(
+        addedSpeakers.map((name) => ({
+          meeting_id: meeting.id,
+          name,
+          role:
+            name.toLowerCase() === hostName.toLowerCase()
+              ? "host"
+              : PLACEHOLDER_SPEAKERS.has(name.toLowerCase())
+                ? "remote"
+                : "participant",
+        })),
+      );
+      if (pErr) console.error("[db] add transcript speakers:", pErr.message);
+    }
 
-// ---------------------------------------------------------------------------
-// Action item CRUD
-// ---------------------------------------------------------------------------
+    return { success: true as const, transcripts: inserted ?? [], addedSpeakers };
+  });
 
 const statusSchema = z.preprocess(
   (v) => (v === "completed" ? "done" : v),
@@ -861,7 +1271,6 @@ export type TodoTask = ActionItemRow & { meeting_title: string | null; is_host: 
 
 const NoInput = z.union([z.undefined(), z.null(), z.object({}).strict()]);
 
-/** Tasks from the caller's own meetings plus tasks assigned to the caller. */
 export const fetchUserTodoTasks = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input?: z.input<typeof NoInput>) => parseInput(NoInput, input))
@@ -875,7 +1284,6 @@ export const fetchUserTodoTasks = createServerFn({ method: "POST" })
     if (mErr) fail("load meetings", mErr, "Could not load your meetings.");
     const titles = new Map((meetings ?? []).map((m) => [m.id, m.title]));
 
-    // Filter by host through a join, so the request does not grow with the number of meetings.
     const [own, assigned] = await Promise.all([
       supabase
         .from("action_items")
@@ -899,7 +1307,6 @@ export const fetchUserTodoTasks = createServerFn({ method: "POST" })
   });
 
 const CreateActionInput = z.object({
-  /** Ignored: the database generates the id. */
   id: z.string().max(100).optional(),
   title: str(500).min(1, "Title is required"),
   assignee: str(200).nullish(),
@@ -921,12 +1328,17 @@ export const createActionItemServer = createServerFn({ method: "POST" })
       if (!deadline) throw new Error("The deadline is not a valid date.");
     }
 
+    const assignee =
+      data.assignee && SELF_SPEAKERS.has(data.assignee.toLowerCase())
+        ? await getHostName(supabase, userId)
+        : data.assignee || null;
+
     const { data: task, error } = await supabase
       .from("action_items")
       .insert({
         meeting_id: data.meetingId,
         title: data.title,
-        assignee: data.assignee || null,
+        assignee,
         deadline,
         status: data.status ?? "pending",
       })
@@ -935,3 +1347,10 @@ export const createActionItemServer = createServerFn({ method: "POST" })
     if (error) fail("create task", error, "Could not create the task.");
     return { success: true as const, task };
   });
+
+export const reconcileProjectTasks = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((input?: z.input<typeof NoInput>) => parseInput(NoInput, input))
+  .handler(async ({ context }): Promise<TaskProgressResult> =>
+    reconcileTaskProgress(context.supabase, context.userId),
+  );

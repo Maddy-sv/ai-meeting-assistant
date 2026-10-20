@@ -6,14 +6,13 @@ export interface StatTileProps {
   label: ReactNode;
   value: ReactNode;
   icon?: ComponentType<{ className?: string }>;
-  /** Secondary line under the value, e.g. "3 today". */
+
   hint?: ReactNode;
-  /** Shows a skeleton instead of the value. */
+
   loading?: boolean;
   className?: string;
 }
 
-/** Compact KPI card: icon, label, big number and an optional hint. */
 export function StatTile({ label, value, icon: Icon, hint, loading, className }: StatTileProps) {
   return (
     <div className={cn("glass rounded-2xl p-5 shadow-soft", className)}>

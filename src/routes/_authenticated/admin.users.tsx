@@ -26,7 +26,7 @@ import { useUser } from "@/lib/auth";
 import { adminListUsers, adminSetUserActive, adminSetUserRole, type AdminUser } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/admin/users")({
-  head: () => ({ meta: [{ title: "Users — Admin — AI Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "Users — Admin — AI Powered Meeting Companion" }] }),
   component: AdminUsers,
 });
 
@@ -70,7 +70,7 @@ function AdminUsers() {
           title: pending.user.is_admin ? "Remove admin role?" : "Make this user an admin?",
           description: pending.user.is_admin
             ? `${label(pending.user)} will lose access to the admin area.`
-            : `${label(pending.user)} will be able to see every user, meeting and AI usage statistic.`,
+            : `${label(pending.user)} will be able to see every user and meeting.`,
           confirmLabel: pending.user.is_admin ? "Remove admin" : "Make admin",
           destructive: pending.user.is_admin,
         }
@@ -145,12 +145,24 @@ function AdminUsers() {
                 const isMe = u.id === me?.id;
                 return (
                   <TableRow key={u.id} className="border-border">
-                    <TableCell className="min-w-48">
-                      <div className="font-medium">
-                        {u.full_name || "Unnamed user"}
-                        {isMe && <span className="ml-2 text-xs text-muted-foreground">(you)</span>}
+                    <TableCell className="min-w-56">
+                      <div className="flex items-center gap-3">
+                        <span
+                          className="gradient-bg grid h-9 w-9 shrink-0 place-items-center rounded-full text-sm font-bold text-primary-foreground"
+                          aria-hidden
+                        >
+                          {(u.full_name || u.email || "?").trim().charAt(0).toUpperCase() || "?"}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="font-medium">
+                            {u.full_name || "Unnamed user"}
+                            {isMe && (
+                              <span className="ml-2 text-xs text-muted-foreground">(you)</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground">{u.email}</div>
+                        </div>
                       </div>
-                      <div className="text-xs text-muted-foreground">{u.email}</div>
                     </TableCell>
                     <TableCell>
                       {u.is_admin ? (

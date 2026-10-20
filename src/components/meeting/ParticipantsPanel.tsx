@@ -175,7 +175,9 @@ function ParticipantRow({
         ) : (
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{p.name}</p>
-            <p className="truncate text-xs text-muted-foreground">{p.email || "No email"}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {p.email || (isHost ? "Host & Speaker" : "Participant")}
+            </p>
           </div>
         )}
       </div>
@@ -219,6 +221,44 @@ function ParticipantRow({
   );
 }
 
+function QuickAddParticipant({ edits }: { edits: MeetingTranscriptEdits }) {
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    setSaving(true);
+    const ok = await edits.addParticipant({ name, email: "", role: "participant" });
+    setSaving(false);
+    if (ok) setName("");
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className="flex items-center gap-1.5 rounded-xl border border-border bg-surface-1 p-1 transition-colors focus-within:border-primary/50"
+    >
+      <Input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Add member…"
+        aria-label="New participant name"
+        className="h-8 border-0 bg-transparent px-2 text-xs focus-visible:ring-0 focus-visible:ring-offset-0"
+      />
+      <Button
+        type="submit"
+        size="sm"
+        disabled={saving || !name.trim()}
+        className="gradient-bg h-7 shrink-0 rounded-lg px-3 text-xs text-primary-foreground"
+      >
+        {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+        Add
+      </Button>
+    </form>
+  );
+}
+
 export function ParticipantsPanel({
   participants,
   hostName,
@@ -244,6 +284,7 @@ export function ParticipantsPanel({
         </div>
         {!readOnly && <AddParticipantDialog edits={edits} />}
       </div>
+      {!readOnly && <QuickAddParticipant edits={edits} />}
       {participants.length === 0 ? (
         <p className="py-4 text-center text-xs text-muted-foreground">
           No participants yet. You are added when recording starts, and remote speakers are added

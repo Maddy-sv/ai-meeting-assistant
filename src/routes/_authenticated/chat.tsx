@@ -1,15 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Bot,
-  Loader2,
-  MessageSquare,
-  Send,
-  Sparkles,
-  Trash2,
-  User as UserIcon,
-} from "lucide-react";
+import { Bot, Loader2, Send, Sparkles, Trash2, User as UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,16 +11,19 @@ import { askChat, clearChatMessages, dataKeys, listChatMessages } from "@/lib/rp
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/chat")({
-  head: () => ({ meta: [{ title: "Ask your meetings — AI Powered Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "AI Chat Bot — AI Powered Meeting Companion" }] }),
   component: ChatPage,
 });
 
 const MAX_MESSAGE_LENGTH = 4000;
 
+const GREETING =
+  "Hi, I'm AI Powered Meeting Companion. Ask me anything about your meetings — decisions, action items, discussions or people.";
+
 const SUGGESTIONS = [
-  "What decisions were made in my last meeting?",
+  "What was discussed yesterday?",
+  "What decisions were made?",
   "Which tasks are still open?",
-  "Summarise this week's meetings",
   "What deadlines are coming up?",
 ];
 
@@ -63,7 +58,7 @@ function ChatPage() {
     setPending(message);
     try {
       await askChat(message);
-      // The server saved both messages; reload the history before dropping the optimistic bubble.
+
       await queryClient.invalidateQueries({ queryKey: dataKeys.chat(userId) });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not send your message.");
@@ -80,13 +75,11 @@ function ChatPage() {
     toast.success("Chat history cleared.");
   }
 
-  const empty = history.isSuccess && messages.length === 0 && !pending;
-
   return (
     <div className="mx-auto flex h-[calc(100dvh-8.5rem)] max-w-3xl flex-col gap-4 lg:h-[calc(100dvh-10rem)]">
       <PageHeader
-        title="Ask your meetings"
-        description="Answers come only from your own meetings, summaries, tasks and decisions."
+        title="AI Chat Bot"
+        description="Ask AI Powered Meeting Companion. Answers come only from your own meetings, summaries, tasks and decisions."
         actions={
           messages.length > 0 && (
             <ConfirmDialog
@@ -110,18 +103,10 @@ function ChatPage() {
         {history.isError && (
           <ErrorState message={history.error.message} onRetry={() => history.refetch()} />
         )}
-        {empty && (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-primary/15 text-primary">
-              <MessageSquare className="h-6 w-6" aria-hidden />
-            </div>
-            <h2 className="text-lg font-semibold">Ask anything about your meetings</h2>
-            <p className="max-w-md text-sm text-muted-foreground">
-              For example, who owns a task, what was decided, or what is due this week.
-            </p>
-          </div>
-        )}
         <ol aria-live="polite" aria-label="Chat messages" className="space-y-3">
+          {history.isSuccess && messages.length === 0 && (
+            <Bubble role="assistant" content={GREETING} />
+          )}
           {messages.map((m) => (
             <Bubble key={m.id} role={m.role} content={m.content} />
           ))}
@@ -143,8 +128,8 @@ function ChatPage() {
         <div ref={endRef} />
       </div>
 
-      {messages.length === 0 && (
-        <div className="flex flex-wrap gap-2" aria-label="Suggested questions">
+      {history.isSuccess && (
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Suggested questions">
           {SUGGESTIONS.map((s) => (
             <Button
               key={s}

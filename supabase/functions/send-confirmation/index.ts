@@ -1,5 +1,3 @@
-// Sends a "meeting scheduled" confirmation to the signed-in user.
-// The recipient is always the authenticated user's own email address.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { escapeHtml, formatPlatform, safeHttpsUrl, sendEmail } from "../_shared/email.ts";
 

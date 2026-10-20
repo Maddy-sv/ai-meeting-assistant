@@ -59,16 +59,11 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/*
- * The product is dark-only. The palette is declared on both :root and .dark so
- * it works whether or not the `dark` class is present; __root.tsx sets
- * class="dark" on <html> so shadcn `dark:` variants also apply.
- */
 :root,
 .dark {
   color-scheme: dark;
   --radius: 0.875rem;
-  /* Base = deep near-black indigo */
+
   --background: oklch(0.16 0.03 275);
   --foreground: oklch(0.97 0.01 275);
   --card: oklch(0.22 0.035 275 / 0.6);
@@ -89,21 +84,19 @@
   --input: oklch(1 0 0 / 12%);
   --ring: oklch(0.68 0.19 285);
 
-  --brand: oklch(0.68 0.19 285); /* purple */
-  --brand-2: oklch(0.66 0.17 235); /* blue */
+  --brand: oklch(0.68 0.19 285);
+  --brand-2: oklch(0.66 0.17 235);
   --success: oklch(0.72 0.16 155);
   --success-foreground: oklch(0.16 0.03 275);
   --warning: oklch(0.78 0.15 75);
   --warning-foreground: oklch(0.16 0.03 275);
-  --info: oklch(0.66 0.17 235); /* = brand-2 */
+  --info: oklch(0.66 0.17 235);
   --info-foreground: oklch(0.99 0 0);
   --admin: oklch(0.72 0.17 330);
 
-  /* Opaque surfaces for panels that must not be translucent (menus, chat bubbles, etc.) */
   --surface-1: oklch(0.19 0.03 275);
   --surface-2: oklch(0.23 0.035 275);
 
-  /* Categorical chart palette (purple, blue, green, amber, pink) */
   --chart-1: oklch(0.68 0.19 285);
   --chart-2: oklch(0.66 0.17 235);
   --chart-3: oklch(0.72 0.16 155);
@@ -151,7 +144,6 @@
   }
 }
 
-/* Respect the user's reduced-motion preference everywhere. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -191,7 +183,6 @@
   box-shadow: var(--shadow-soft);
 }
 
-/* Thin, on-brand scrollbar for scrollable panels. */
 @utility custom-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: oklch(1 0 0 / 0.15) transparent;

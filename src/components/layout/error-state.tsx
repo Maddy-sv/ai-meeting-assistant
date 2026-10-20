@@ -4,14 +4,13 @@ import { cn } from "@/lib/utils";
 
 export interface ErrorStateProps {
   title?: string;
-  /** User-friendly message; pass `error.message` from a thrown server error. */
+
   message?: string;
-  /** When given, shows a "Try again" button. */
+
   onRetry?: () => void;
   className?: string;
 }
 
-/** Inline error panel for a failed async view, with an optional retry. */
 export function ErrorState({
   title = "Something went wrong",
   message = "We couldn't load this right now. Please try again.",

@@ -5,14 +5,12 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   createActionItemServer,
   deleteActionItemServer,
+  reconcileProjectTasks,
   updateActionItemStatus,
 } from "@/lib/ai.functions";
-import {
-  normalizeTaskStatus,
-  type TaskStatus,
-  TASK_STATUS_LABEL,
-} from "@/components/meeting/status";
+import { normalizeTaskStatus, type TaskStatus } from "@/components/meeting/status";
 import { errorMessage } from "@/components/meeting/utils";
+import { TODO_STATUS_LABEL } from "@/components/todo/labels";
 
 export type TodoTask = {
   id: string;
@@ -55,14 +53,10 @@ function extractRow(res: unknown): RawTask | null {
   return null;
 }
 
-/**
- * The signed-in user's tasks: every action item from meetings they host, plus items
- * assigned to them in other meetings. The database is the only source of truth;
- * realtime keeps the board in sync with meeting pages and other tabs.
- */
 export function useTodoTasks() {
   const [userId, setUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState("");
+  const [profileName, setProfileName] = useState("");
   const [tasks, setTasks] = useState<TodoTask[]>([]);
   const [meetings, setMeetings] = useState<TodoMeeting[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,6 +70,8 @@ export function useTodoTasks() {
   const createFn = useServerFn(createActionItemServer);
   const updateFn = useServerFn(updateActionItemStatus);
   const deleteFn = useServerFn(deleteActionItemServer);
+  const reconcileFn = useServerFn(reconcileProjectTasks);
+  const reconciledRef = useRef(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -94,13 +90,12 @@ export function useTodoTasks() {
           .order("created_at", { ascending: false }),
       ]);
       if (mErr) throw new Error(mErr.message);
+      setProfileName(prof?.full_name?.trim() || "");
       setUserName(prof?.full_name?.trim() || auth.user.email?.split("@")[0] || "");
       const meetingList = (mData ?? []) as TodoMeeting[];
       setMeetings(meetingList);
       meetingIdsRef.current = new Set(meetingList.map((m) => m.id));
 
-      // Join on the meeting and filter by host in the database, so the request
-      // does not grow with the number of meetings.
       const own = await supabase
         .from("action_items")
         .select("*, meetings!inner(host_id)")
@@ -108,7 +103,6 @@ export function useTodoTasks() {
         .order("created_at", { ascending: false });
       if (own.error) throw new Error(own.error.message);
 
-      // Items other hosts assigned to this user (visible through the assignee RLS policy).
       const assigned = await supabase
         .from("action_items")
         .select("*")
@@ -139,6 +133,24 @@ export function useTodoTasks() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (reconciledRef.current) return;
+    reconciledRef.current = true;
+    void (async () => {
+      try {
+        const res = await reconcileFn();
+        if (res.updated === 0) return;
+        await load();
+        toast.success(
+          `${res.updated} task${res.updated === 1 ? "" : "s"} updated from later meetings.`,
+          { id: "todo-progress-reconciled" },
+        );
+      } catch (err) {
+        console.warn("[todo] cross-meeting progress check failed:", errorMessage(err, "failed"));
+      }
+    })();
+  }, [reconcileFn, load]);
 
   useEffect(() => {
     if (!userId) return;
@@ -179,7 +191,7 @@ export function useTodoTasks() {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)));
     try {
       await updateFn({ data: { actionId: taskId, status } });
-      toast.success(`Moved to ${TASK_STATUS_LABEL[status]}.`);
+      toast.success(`Moved to ${TODO_STATUS_LABEL[status]}.`);
     } catch (err) {
       setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status: previous } : t)));
       toast.error(errorMessage(err, "Could not update the task."));
@@ -203,7 +215,7 @@ export function useTodoTasks() {
       const res = await createFn({
         data: {
           title: input.title.trim(),
-          assignee: input.assignee.trim() || null,
+          assignee: input.assignee.trim() || profileName || null,
           meetingId: input.meetingId,
           deadline: input.deadline || null,
           status: input.status,
@@ -226,6 +238,7 @@ export function useTodoTasks() {
   return {
     userId,
     userName,
+    profileName,
     tasks,
     meetings,
     meetingsById,

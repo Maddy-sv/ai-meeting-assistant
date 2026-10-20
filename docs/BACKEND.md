@@ -16,12 +16,13 @@ Apply the files in `supabase/migrations/` in filename order:
    - profile protection;
    - `action_items.assignee_user_id`, `canonical_key` and `updated_at`;
    - `chat_messages` and `ai_usage`;
-   - the admin RPCs, `search_workspace` and `seed_demo_workspace`;
+   - the admin RPCs and `search_workspace`;
    - realtime publication.
 6. `20261020130000_meeting_status.sql`:
    - `meetings.status` is limited to `upcoming`, `live` or `completed` (old `in_progress` rows become `live`, unknown values become `upcoming`);
    - `is_active_user()`: disabled accounts can still read their own data but cannot insert, update or delete it;
    - `my_open_task_count()` for the dashboard.
+7. `20261020150000_remove_demo_seed.sql`: removes the demo-data function and the admin AI-usage report.
 
 How to apply them:
 
@@ -100,25 +101,6 @@ To schedule reminders, follow the steps at the top of `supabase/sql/schedule_rem
 
 `schedule_reminders.sql` is not a migration.
 
-## 5. Demo data (for the research-paper scenario)
-
-Signed-in users can load the two-meeting Continuous Meeting Memory demo into **their own** workspace:
-
-```ts
-const { data, error } = await supabase.rpc("seed_demo_workspace");
-// data: { project_id, meeting_ids: [m1, m2], created: boolean }
-```
-
-What this creates:
-
-- the project "Demo: Continuous Meeting Memory";
-- two completed meetings, with participants, transcripts, summaries, action items and decisions;
-- dates relative to today, with the host name taken from the user's profile.
-
-Calling it again does nothing and returns the existing project (`created: false`). To seed again, delete that project and its meetings.
-
-No demo content is ever created automatically.
-
 ## 6. AI limits and behaviour
 
 - Each Gemini call:
@@ -136,3 +118,4 @@ No demo content is ever created automatically.
 - Meeting text is passed to the model as delimited data, and the model is told not to follow instructions inside it.
 - Server functions verify the Supabase JWT (signature and expiry) and refuse disabled accounts.
 - Server functions also check that the caller owns the meeting or project before changing anything.
+

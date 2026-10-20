@@ -4,17 +4,19 @@ import { Button } from "@/components/ui/button";
 import type { MeetingTasks } from "@/hooks/use-meeting-tasks";
 import { copyText, openInGmail, openInMailApp } from "./utils";
 
-/** Personal recaps per participant, generated on demand from the meeting's real tasks. */
 export function ParticipantRecaps({
   tasks,
   hasSummary,
+  hasTranscript,
   hasParticipants,
 }: {
   tasks: MeetingTasks;
   hasSummary: boolean;
+  hasTranscript: boolean;
   hasParticipants: boolean;
 }) {
-  const { recaps, generatingRecaps } = tasks;
+  const { recaps, generatingRecaps, summarizing } = tasks;
+  const busy = generatingRecaps || summarizing;
 
   return (
     <section className="glass rounded-2xl p-6" aria-labelledby="recaps-heading">
@@ -23,35 +25,36 @@ export function ParticipantRecaps({
           <Users className="h-5 w-5 text-primary" aria-hidden />
           <div>
             <h3 id="recaps-heading" className="text-lg font-semibold">
-              Individual recaps
+              Individual Participant Tasks & Recaps
             </h3>
             <p className="text-xs text-muted-foreground">
-              A personal message for each participant listing the tasks assigned to them.
+              Generates customized messages for each participant highlighting their specific
+              deliverables.
             </p>
           </div>
         </div>
         <Button
           size="sm"
           onClick={() => void tasks.generateRecaps()}
-          disabled={generatingRecaps || !hasSummary || !hasParticipants}
+          disabled={busy || !hasParticipants || (!hasSummary && !hasTranscript)}
           className="gradient-bg rounded-full text-primary-foreground"
         >
-          {generatingRecaps ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Sparkles className="h-4 w-4" />
-          )}
-          Generate recaps
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          {generatingRecaps
+            ? "Generating..."
+            : hasSummary
+              ? "Generate Individual Recaps"
+              : "Generate Summary & Recaps"}
         </Button>
       </div>
 
       {recaps.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
-          {!hasSummary
-            ? "Generate the meeting summary first."
-            : !hasParticipants
-              ? "Add participants to create individual recaps."
-              : "Generate recaps to prepare a message for each participant."}
+          {!hasParticipants
+            ? "Add participants to create individual recaps."
+            : !hasSummary && !hasTranscript
+              ? "Record or paste a transcript first, so a summary can be generated."
+              : "Click Generate Individual Recaps to break down tasks and send personal notes to each attendee."}
         </p>
       ) : (
         <ul className="space-y-4">
@@ -73,17 +76,23 @@ export function ParticipantRecaps({
                 <Button
                   size="sm"
                   className="rounded-full"
-                  onClick={() => openInGmail(r.email || "", r.subject, r.body)}
+                  onClick={() => {
+                    openInGmail(r.email || "", r.subject, r.body);
+                    toast.success(`Opening Gmail to send to ${r.participantName}...`);
+                  }}
                 >
-                  <ExternalLink className="h-4 w-4" /> Gmail
+                  <ExternalLink className="h-4 w-4" /> Send via Gmail
                 </Button>
                 <Button
                   size="sm"
                   variant="outline"
                   className="rounded-full"
-                  onClick={() => openInMailApp(r.email || "", r.subject, r.body)}
+                  onClick={() => {
+                    openInMailApp(r.email || "", r.subject, r.body);
+                    toast.success(`Opening Mail app for ${r.participantName}...`);
+                  }}
                 >
-                  <Mail className="h-4 w-4" /> Mail app
+                  <Mail className="h-4 w-4" /> Send via Mail App
                 </Button>
                 <Button
                   size="sm"
@@ -91,11 +100,11 @@ export function ParticipantRecaps({
                   className="rounded-full"
                   onClick={async () => {
                     if (await copyText(r.body))
-                      toast.success(`Copied the recap for ${r.participantName}.`);
+                      toast.success(`Copied recap for ${r.participantName}!`);
                     else toast.error("Could not copy to the clipboard.");
                   }}
                 >
-                  <Copy className="h-4 w-4" /> Copy
+                  <Copy className="h-4 w-4" /> Copy Message
                 </Button>
               </div>
             </li>

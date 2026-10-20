@@ -27,14 +27,15 @@ function addRecipient(current: string, email: string): string {
 function ComposerBody({
   draft,
   participants,
+  initialTo,
   onSent,
 }: {
   draft: { subject: string; body: string };
   participants: Participant[];
+  initialTo: string;
   onSent: () => void;
 }) {
-  // DialogContent unmounts on close, so the form starts fresh each time it opens.
-  const [to, setTo] = useState(() => participantEmails(participants).join(", "));
+  const [to, setTo] = useState(() => initialTo || participantEmails(participants).join(", "));
   const [subject, setSubject] = useState(draft.subject);
   const [body, setBody] = useState(draft.body);
 
@@ -57,7 +58,7 @@ function ComposerBody({
         />
         {withEmail.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            <span className="text-xs text-muted-foreground">Add attendee:</span>
+            <span className="text-xs text-muted-foreground">Quick add attendee:</span>
             {withEmail.map((p) => (
               <Button
                 key={p.id}
@@ -70,6 +71,21 @@ function ComposerBody({
                 <Plus className="h-3 w-3" /> {p.name}
               </Button>
             ))}
+            {withEmail.length > 1 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 rounded-full border-primary/30 text-xs text-primary"
+                onClick={() =>
+                  setTo((prev) =>
+                    participantEmails(participants).reduce((acc, e) => addRecipient(acc, e), prev),
+                  )
+                }
+              >
+                <Plus className="h-3 w-3" /> Add All Attendees
+              </Button>
+            )}
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">
@@ -98,7 +114,7 @@ function ComposerBody({
           className="rounded-full"
           onClick={() => void copy()}
         >
-          <Copy className="h-4 w-4" /> Copy text
+          <Copy className="h-4 w-4" /> Copy Email Content
         </Button>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -107,7 +123,7 @@ function ComposerBody({
             className="rounded-full"
             onClick={() => openInMailApp(to, subject, body)}
           >
-            <Mail className="h-4 w-4" /> Open in mail app
+            <Mail className="h-4 w-4" /> Send via Mail App (Outlook / Apple Mail)
           </Button>
           <Button
             type="button"
@@ -117,7 +133,7 @@ function ComposerBody({
               onSent();
             }}
           >
-            <ExternalLink className="h-4 w-4" /> Open in Gmail
+            <ExternalLink className="h-4 w-4" /> Send with Gmail
           </Button>
         </div>
       </div>
@@ -125,23 +141,24 @@ function ComposerBody({
   );
 }
 
-/** Edit the recap before handing it to Gmail or the system mail app. */
 export function EmailComposerDialog({
   open,
   onOpenChange,
   draft,
   participants,
+  initialTo = "",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   draft: { subject: string; body: string };
   participants: Participant[];
+  initialTo?: string;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Email the meeting recap</DialogTitle>
+          <DialogTitle>Share via Email</DialogTitle>
           <DialogDescription>
             Review the recap, then open it in Gmail or your mail app to send it.
           </DialogDescription>
@@ -149,6 +166,7 @@ export function EmailComposerDialog({
         <ComposerBody
           draft={draft}
           participants={participants}
+          initialTo={initialTo}
           onSent={() => onOpenChange(false)}
         />
       </DialogContent>

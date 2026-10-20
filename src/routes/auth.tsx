@@ -37,17 +37,15 @@ export const Route = createFileRoute("/auth")({
   }),
   head: () => ({
     meta: [
-      { title: "Sign in — AI Meeting Companion" },
+      { title: "Sign in — AI Powered Meeting Companion" },
       {
         name: "description",
-        content: "Sign in to AI Meeting Companion and let AI handle your meeting notes.",
+        content: "Sign in to AI Powered Meeting Companion and let AI handle your meeting notes.",
       },
     ],
   }),
   component: AuthPage,
 });
-
-/* ------------------------------------------------------------- helpers */
 
 const emailField = z.string().trim().min(1, "Enter your email").email("Enter a valid email");
 const newPasswordField = z
@@ -76,7 +74,6 @@ function emailRedirectUrl() {
   return `${window.location.origin}/auth`;
 }
 
-/** Maps Supabase auth errors to generic, non-enumerating messages. */
 function authErrorMessage(error: AuthError | Error, fallback: string): string {
   const code = "code" in error ? error.code : undefined;
   const status = "status" in error ? error.status : undefined;
@@ -89,8 +86,6 @@ function authErrorMessage(error: AuthError | Error, fallback: string): string {
   return fallback;
 }
 
-/* ---------------------------------------------------------------- page */
-
 function AuthPage() {
   const router = useRouter();
   const search = Route.useSearch();
@@ -99,7 +94,6 @@ function AuthPage() {
   const [mode, setMode] = useState<Mode>(search.mode ?? "signin");
   const [pendingEmail, setPendingEmail] = useState("");
 
-  // Already signed in (or just signed in, confirmed an email, or returned from Google): continue.
   useEffect(() => {
     if (!loading && session && mode !== "check-email") {
       router.history.replace(redirectTo);
@@ -112,8 +106,11 @@ function AuthPage() {
   }
 
   const heading: Record<Mode, { title: string; subtitle: string }> = {
-    signin: { title: "Welcome back", subtitle: "Sign in to your meeting workspace" },
-    signup: { title: "Create your account", subtitle: "Start capturing every meeting" },
+    signin: {
+      title: "Welcome back",
+      subtitle: "Sign in to your AI Powered Meeting Companion workspace",
+    },
+    signup: { title: "Create your account", subtitle: "Start automating your meetings" },
     forgot: { title: "Reset your password", subtitle: "We'll email you a secure reset link" },
     "check-email": { title: "Check your email", subtitle: "One more step to finish" },
   };
@@ -125,7 +122,7 @@ function AuthPage() {
           <div className="gradient-bg grid h-10 w-10 place-items-center rounded-xl shadow-glow">
             <Sparkles className="h-5 w-5 text-primary-foreground" />
           </div>
-          <span className="text-xl font-bold tracking-tight">AI Meeting Companion</span>
+          <span className="text-xl font-bold tracking-tight">AI Powered Meeting Companion</span>
         </Link>
 
         <div className="glass rounded-3xl p-6 shadow-soft sm:p-8">
@@ -177,8 +174,6 @@ function AuthPage() {
   );
 }
 
-/* --------------------------------------------------------------- forms */
-
 function SignInForm({ onNeedsConfirmation }: { onNeedsConfirmation: (email: string) => void }) {
   const form = useForm<z.infer<typeof signInSchema>>({
     resolver: zodResolver(signInSchema),
@@ -187,7 +182,7 @@ function SignInForm({ onNeedsConfirmation }: { onNeedsConfirmation: (email: stri
 
   async function onSubmit(values: z.infer<typeof signInSchema>) {
     const { error } = await supabase.auth.signInWithPassword(values);
-    if (!error) return; // AuthPage redirects once the session arrives.
+    if (!error) return;
     if (error.code === "email_not_confirmed") {
       toast.info("Please confirm your email address first.");
       onNeedsConfirmation(values.email);
@@ -257,8 +252,7 @@ function SignUpForm({ onCheckEmail }: { onCheckEmail: (email: string) => void })
       );
       return;
     }
-    // With email confirmation enabled Supabase returns no session (and never reveals whether
-    // the address was already registered). Otherwise the user is signed in straight away.
+
     if (!data.session) onCheckEmail(values.email);
     else toast.success("Welcome! Your account is ready.");
   }
@@ -339,7 +333,7 @@ function ForgotForm({ onDone }: { onDone: () => void }) {
       toast.error(authErrorMessage(error, ""));
       return;
     }
-    // Same message whether or not the address exists, to avoid account enumeration.
+
     toast.success("If an account exists for that email, a reset link is on its way.");
     onDone();
   }
@@ -419,8 +413,6 @@ function CheckEmail({ email }: { email: string }) {
   );
 }
 
-/* ------------------------------------------------------------- buttons */
-
 function SubmitButton({ pending, children }: { pending: boolean; children: ReactNode }) {
   return (
     <Button type="submit" variant="brand" className="mt-2 w-full" disabled={pending}>
@@ -445,7 +437,6 @@ function GoogleButton({ redirectTo }: { redirectTo: string }) {
         console.error("[auth] Google sign-in failed", error);
         toast.error("Google sign-in failed. Please try again.");
       }
-      // Otherwise the browser is redirecting; AuthProvider finishes the sign-in on return.
     } catch (error) {
       console.error("[auth] Google sign-in failed", error);
       toast.error("Google sign-in failed. Please try again.");
@@ -462,7 +453,6 @@ function GoogleButton({ redirectTo }: { redirectTo: string }) {
   );
 }
 
-/** Google "G" mark, drawn in the current text colour. */
 function GoogleIcon() {
   return (
     <svg viewBox="0 0 48 48" aria-hidden="true" fill="currentColor">

@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import type { UserIdentity } from "@supabase/supabase-js";
-import { CheckCircle2, FlaskConical, KeyRound, Link2, Loader2, LogOut, Mail } from "lucide-react";
+import { CheckCircle2, KeyRound, Link2, Loader2, LogOut, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { GOOGLE_ENABLED } from "@/lib/features";
@@ -30,10 +30,10 @@ import {
 } from "@/components/ui/select";
 import { ConfirmDialog, ErrorState, LoadingState, PageHeader, Section } from "@/components/layout";
 import { authKeys, useProfile, useUser } from "@/lib/auth";
-import { seedDemoWorkspace, type ProfileRow } from "@/lib/rpc";
+import { type ProfileRow } from "@/lib/rpc";
 
 export const Route = createFileRoute("/_authenticated/profile")({
-  head: () => ({ meta: [{ title: "Profile — AI Powered Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "Profile & Settings — AI Powered Meeting Companion" }] }),
   component: ProfilePage,
 });
 
@@ -68,9 +68,7 @@ function supportedTimeZones(): string[] {
     const intl = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };
     const zones = intl.supportedValuesOf?.("timeZone");
     if (zones && zones.length > 0) return zones.includes("UTC") ? zones : ["UTC", ...zones];
-  } catch {
-    // Older browsers: use the short list below.
-  }
+  } catch {}
   return FALLBACK_TIME_ZONES;
 }
 
@@ -138,7 +136,6 @@ function ProfilePage() {
           <ProfileDetails profile={profile.data} />
           {GOOGLE_ENABLED && <ConnectedAccounts />}
           <SecurityCard />
-          <DemoWorkspaceCard />
         </>
       )}
     </div>
@@ -188,7 +185,7 @@ function ProfileDetails({ profile }: { profile: ProfileRow | null }) {
       toast.error("Could not save your profile. Please try again.");
       return;
     }
-    // Keep the auth metadata in sync so the header shows the new name straight away.
+
     const { error: metaError } = await supabase.auth.updateUser({
       data: { full_name: values.full_name, name: values.full_name },
     });
@@ -523,52 +520,6 @@ function SecurityCard() {
           </div>
         </form>
       </Form>
-    </Section>
-  );
-}
-
-function DemoWorkspaceCard() {
-  const queryClient = useQueryClient();
-
-  async function loadDemo() {
-    const result = await seedDemoWorkspace();
-    if (!result.created) {
-      toast.info("Demo workspace is already loaded.");
-    } else {
-      toast.success(
-        `Demo workspace added: ${result.meeting_ids.length} sample meetings with transcripts, summaries and tasks.`,
-      );
-    }
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["meetings"] }),
-      queryClient.invalidateQueries({ queryKey: ["projects"] }),
-      queryClient.invalidateQueries({ queryKey: ["user-dashboard"] }),
-      queryClient.invalidateQueries({ queryKey: ["notifications"] }),
-    ]);
-  }
-
-  return (
-    <Section
-      card
-      title="Demo workspace"
-      description="Explore the app with a sample project and two meetings from the research scenario."
-    >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-muted-foreground">
-          The demo is added to your account only. You can delete it like any other meeting.
-        </p>
-        <ConfirmDialog
-          title="Load the demo workspace?"
-          description="This adds a sample project with two meetings, their transcripts, summaries, tasks and decisions to your account. Nobody else will see them."
-          confirmLabel="Load demo"
-          onConfirm={loadDemo}
-          trigger={
-            <Button variant="glass" className="shrink-0">
-              <FlaskConical /> Load demo workspace
-            </Button>
-          }
-        />
-      </div>
     </Section>
   );
 }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { AlertTriangle, ListTodo } from "lucide-react";
+import { AlertTriangle, Lightbulb, ListTodo } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { isSameName } from "@/components/meeting/utils";
@@ -11,7 +11,7 @@ import { TaskFilters, type TaskScope } from "@/components/todo/TaskFilters";
 import { useTodoTasks } from "@/hooks/use-todo-tasks";
 
 export const Route = createFileRoute("/_authenticated/todo")({
-  head: () => ({ meta: [{ title: "Tasks & Action Items — AI Powered Meeting Companion" }] }),
+  head: () => ({ meta: [{ title: "To-Do List & Action Items — AI Powered Meeting Companion" }] }),
   component: TodoPage,
 });
 
@@ -47,12 +47,17 @@ function TodoPage() {
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
         <div>
-          <h1 className="text-3xl font-black tracking-tight">To-do</h1>
+          <h1 className="text-3xl font-black tracking-tight">To-Do List & Action Items</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Action items from your meetings and tasks assigned to you.
+            All tasks extracted from your meetings and deliverables assigned to you appear here
+            automatically.
           </p>
         </div>
-        <CreateTaskDialog meetings={todo.meetings} onCreate={todo.createTask} />
+        <CreateTaskDialog
+          meetings={todo.meetings}
+          defaultAssignee={todo.profileName}
+          onCreate={todo.createTask}
+        />
       </div>
 
       <TaskFilters
@@ -95,6 +100,10 @@ function TodoPage() {
         </div>
       ) : (
         <>
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Lightbulb className="h-4 w-4 shrink-0 text-warning" aria-hidden />
+            Click on any task card to view its complete meeting summary & details
+          </p>
           {visible.length === 0 && (
             <p className="text-sm text-muted-foreground" role="status">
               No tasks match these filters.

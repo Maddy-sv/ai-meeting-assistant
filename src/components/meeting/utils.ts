@@ -10,7 +10,6 @@ import type {
   Transcript,
 } from "./types";
 
-/** Returns the message of a thrown server error, or a fallback. */
 export function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof Error && err.message) return err.message;
   if (typeof err === "string" && err) return err;
@@ -23,12 +22,6 @@ export function errorMessage(err: unknown, fallback: string): string {
 
 export const NO_PERMISSION_MESSAGE = "You don't have permission to change this meeting.";
 
-/**
- * Checks the result of an update or delete that ended with `.select("id")`.
- * Row-level security silently skips rows the caller may not change, so zero
- * affected rows is reported as a permission problem instead of a success.
- * Returns an error message, or null when at least one row changed.
- */
 export function mutationError(
   res: { data: unknown[] | null; error: { message?: string } | null },
   fallback: string,
@@ -66,7 +59,6 @@ export function formatDuration(totalSeconds: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
 }
 
-/** Summary list columns are JSONB; accept arrays or a single string. */
 export function toStringList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).filter(Boolean);
@@ -90,13 +82,61 @@ const SPEAKER_TONES = [
   "bg-chart-5/20 text-chart-5",
 ];
 
-/** Stable avatar colour per speaker, from the chart tokens. The host always uses primary. */
 export function speakerTone(name: string | null | undefined, isHost: boolean): string {
   if (isHost) return "bg-primary/20 text-primary";
   const str = (name || "").toLowerCase().trim();
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) | 0;
   return SPEAKER_TONES[Math.abs(hash) % SPEAKER_TONES.length];
+}
+
+export const REMOTE_PARTICIPANT_LABEL = "Remote Participant";
+
+const GENERIC_SPEAKERS = new Set([
+  "remote",
+  "remote participant",
+  "remote speaker",
+  "unknown",
+  "unknown speaker",
+  "speaker",
+  "participant",
+]);
+
+export function isGenericRemote(name?: string | null): boolean {
+  return GENERIC_SPEAKERS.has((name ?? "").trim().toLowerCase());
+}
+
+export function firstName(name?: string | null): string {
+  return (name ?? "").trim().split(/\s+/)[0] ?? "";
+}
+
+export function friendlyAiError(err: unknown, fallback: string): string {
+  const msg = errorMessage(err, fallback);
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes("api key not valid") ||
+    lower.includes("api_key_invalid") ||
+    lower.includes("unauthenticated") ||
+    lower.includes("invalid authentication credentials")
+  ) {
+    return "Invalid Gemini API key. Ask the administrator to set a valid GEMINI_API_KEY from Google AI Studio.";
+  }
+  if (
+    lower.includes("429") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("rate-limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("please retry in")
+  ) {
+    return "AI rate limit reached. The request was retried automatically. Please wait a few seconds and click Retry.";
+  }
+  if (lower.includes("503") || lower.includes("overloaded") || lower.includes("high demand")) {
+    return "The AI model is currently experiencing high demand. Please try again in a few moments.";
+  }
+  if (lower.includes("failed to fetch") || lower.includes("networkerror")) {
+    return "Could not reach the server. Check your connection and click Retry.";
+  }
+  return msg;
 }
 
 export function isSameName(a?: string | null, b?: string | null): boolean {
@@ -137,6 +177,15 @@ export function formatTranscripts(
   }
 }
 
+export function downloadTranscript(meeting: Meeting | null, transcripts: Transcript[]): boolean {
+  if (transcripts.length === 0) return false;
+  downloadTextFile(
+    `${meeting?.title || "meeting"}-transcript.txt`,
+    formatTranscripts(transcripts, "formatted", meeting),
+  );
+  return true;
+}
+
 export function downloadTextFile(filename: string, text: string) {
   const blob = new Blob([text], { type: "text/plain" });
   const url = URL.createObjectURL(blob);
@@ -149,7 +198,6 @@ export function downloadTextFile(filename: string, text: string) {
 
 const RULE = "----------------------------------------";
 
-/** Builds a plain-text recap email from real meeting data only. */
 export function buildMeetingEmail(
   meeting: Meeting | null,
   summary: Summary | null,

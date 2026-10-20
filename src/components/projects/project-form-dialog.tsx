@@ -39,11 +39,10 @@ export interface ProjectFormDialogProps {
   onOpenChange: (open: boolean) => void;
   mode: "create" | "edit";
   initialValues?: { name: string; description: string | null };
-  /** Persist the values. Throw an Error with a friendly message to keep the dialog open. */
+
   onSubmit: (values: { name: string; description: string | null }) => Promise<void>;
 }
 
-/** Create or edit a project (name + optional description). */
 export function ProjectFormDialog({
   open,
   onOpenChange,

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,13 +12,17 @@ import {
 } from "@/lib/ai.functions";
 import { normalizeTaskStatus } from "@/components/meeting/status";
 import type { ActionItem, Decision, ParticipantRecap } from "@/components/meeting/types";
-import { errorMessage, mutationError } from "@/components/meeting/utils";
+import { errorMessage, friendlyAiError, mutationError } from "@/components/meeting/utils";
 import type { MeetingData } from "./use-meeting-data";
 
 export type NewTaskInput = { title: string; assignee: string; deadline: string };
 export type NewDecisionInput = { description: string; madeBy: string };
 
-/** Accepts both `{ task }` and a bare row from createActionItemServer. */
+const SUMMARY_TIMEOUT_MS = 90_000;
+const SUMMARY_TIMEOUT_MESSAGE = "Summary generation timed out. Please click Retry.";
+
+type SummaryMessages = { pending?: string; success?: string };
+
 function extractCreatedRow(res: unknown): ActionItem | null {
   if (!res || typeof res !== "object") return null;
   const maybe = (res as { task?: unknown }).task ?? res;
@@ -28,12 +32,8 @@ function extractCreatedRow(res: unknown): ActionItem | null {
   return null;
 }
 
-/**
- * Task, decision and AI actions for one meeting. Every mutation reports success or
- * failure with a toast, and optimistic changes are rolled back if the server rejects them.
- */
 export function useMeetingTasks(data: MeetingData) {
-  const { meetingId, actions, setActions, setDecisions, reload } = data;
+  const { meetingId, actions, setActions, setDecisions, reload, hostName } = data;
   const summarizeFn = useServerFn(summarizeMeeting);
   const syncFn = useServerFn(syncMeetingActionItems);
   const recapsFn = useServerFn(generateMeetingRecaps);
@@ -45,33 +45,76 @@ export function useMeetingTasks(data: MeetingData) {
   const [syncingTasks, setSyncingTasks] = useState(false);
   const [generatingRecaps, setGeneratingRecaps] = useState(false);
   const [recaps, setRecaps] = useState<ParticipantRecap[]>([]);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const runRef = useRef(0);
 
-  async function generateSummary(screenshots: string[] = []): Promise<boolean> {
+  async function generateSummary(
+    screenshots: string[] = [],
+    messages: SummaryMessages = {},
+  ): Promise<boolean> {
+    const run = ++runRef.current;
     setSummarizing(true);
+    setSummaryError(null);
+    if (messages.pending) toast.info(messages.pending);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await summarizeFn({ data: { meetingId, screenshots: screenshots.slice(-2) } });
-      toast.success("Summary generated from the transcript.");
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(SUMMARY_TIMEOUT_MESSAGE)), SUMMARY_TIMEOUT_MS);
+      });
+      await Promise.race([
+        summarizeFn({ data: { meetingId, screenshots: screenshots.slice(-2) } }),
+        timeout,
+      ]);
+      if (run !== runRef.current) return false;
+      toast.success(messages.success ?? "AI summary generated from your transcript.");
       return true;
     } catch (err) {
-      toast.error(errorMessage(err, "Could not generate the summary."));
+      if (run !== runRef.current) return false;
+      const message = friendlyAiError(err, "Could not generate the summary.");
+      setSummaryError(message);
+      toast.error(message);
       return false;
     } finally {
-      setSummarizing(false);
-      await reload();
+      clearTimeout(timer);
+      if (run === runRef.current) {
+        setSummarizing(false);
+        await reload();
+      }
     }
   }
 
+  function cancelSummary() {
+    runRef.current += 1;
+    setSummarizing(false);
+    setSummaryError(null);
+    void reload();
+  }
+
+  function refreshAfterClean() {
+    return generateSummary([], {
+      pending: "Updating AI summary & action items from cleaned transcript...",
+      success: "AI Summary & Action Items refreshed!",
+    });
+  }
+
   async function syncTasks() {
+    if (!data.summary) {
+      await generateSummary();
+      return;
+    }
     setSyncingTasks(true);
     try {
       const res = await syncFn({ data: { meetingId } });
       const items = (res?.action_items ?? []) as ActionItem[];
       setActions(items);
       setDecisions((res?.decisions ?? []) as Decision[]);
-      if (items.length > 0) toast.success(`Extracted ${items.length} action item(s).`);
-      else toast.info("No action items were found in this meeting.");
+      if (items.length > 0) {
+        toast.success(`Extracted ${items.length} action item(s) and synced to your To-Do list!`);
+      } else {
+        toast.info("No action items detected in transcript/summary.");
+      }
     } catch (err) {
-      toast.error(errorMessage(err, "Could not extract action items."));
+      toast.error(friendlyAiError(err, "Could not extract action items."));
     } finally {
       setSyncingTasks(false);
     }
@@ -80,13 +123,14 @@ export function useMeetingTasks(data: MeetingData) {
   async function generateRecaps() {
     setGeneratingRecaps(true);
     try {
+      if (!data.summary && !(await generateSummary())) return;
       const res = await recapsFn({ data: { meetingId } });
       const list = (Array.isArray(res) ? res : []) as ParticipantRecap[];
       setRecaps(list);
-      if (list.length > 0) toast.success(`Generated ${list.length} participant recap(s).`);
+      if (list.length > 0) toast.success("Generated individualized recaps for participants.");
       else toast.info("Add participants to generate individual recaps.");
     } catch (err) {
-      toast.error(errorMessage(err, "Could not generate recaps."));
+      toast.error(friendlyAiError(err, "Could not generate recaps."));
     } finally {
       setGeneratingRecaps(false);
     }
@@ -97,7 +141,7 @@ export function useMeetingTasks(data: MeetingData) {
       const res = await createFn({
         data: {
           title: input.title.trim(),
-          assignee: input.assignee.trim() || null,
+          assignee: input.assignee.trim() || hostName,
           meetingId,
           deadline: input.deadline || null,
           status: "pending",
@@ -109,7 +153,7 @@ export function useMeetingTasks(data: MeetingData) {
       } else {
         await reload();
       }
-      toast.success("Action item added.");
+      toast.success("Action item added and synced to your To-Do list!");
       return true;
     } catch (err) {
       toast.error(errorMessage(err, "Could not add the action item."));
@@ -187,10 +231,13 @@ export function useMeetingTasks(data: MeetingData) {
 
   return {
     summarizing,
+    summaryError,
     syncingTasks,
     generatingRecaps,
     recaps,
     generateSummary,
+    cancelSummary,
+    refreshAfterClean,
     syncTasks,
     generateRecaps,
     createTask,
