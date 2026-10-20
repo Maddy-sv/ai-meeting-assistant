@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   createActionItemServer,
   deleteActionItemServer,
+  reconcileProjectTasks,
   updateActionItemStatus,
 } from "@/lib/ai.functions";
 import { normalizeTaskStatus, type TaskStatus } from "@/components/meeting/status";
@@ -69,6 +70,8 @@ export function useTodoTasks() {
   const createFn = useServerFn(createActionItemServer);
   const updateFn = useServerFn(updateActionItemStatus);
   const deleteFn = useServerFn(deleteActionItemServer);
+  const reconcileFn = useServerFn(reconcileProjectTasks);
+  const reconciledRef = useRef(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -130,6 +133,24 @@ export function useTodoTasks() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (reconciledRef.current) return;
+    reconciledRef.current = true;
+    void (async () => {
+      try {
+        const res = await reconcileFn();
+        if (res.updated === 0) return;
+        await load();
+        toast.success(
+          `${res.updated} task${res.updated === 1 ? "" : "s"} updated from later meetings.`,
+          { id: "todo-progress-reconciled" },
+        );
+      } catch (err) {
+        console.warn("[todo] cross-meeting progress check failed:", errorMessage(err, "failed"));
+      }
+    })();
+  }, [reconcileFn, load]);
 
   useEffect(() => {
     if (!userId) return;

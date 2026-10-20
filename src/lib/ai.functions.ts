@@ -4,8 +4,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   buildVerifiedCumulativeSummary,
   evidenceSupported,
-  planTaskProgressUpdates,
   resolveDeadlineToISODate,
+  resolveTaskAssignee,
   safeFormatDeadline,
 } from "./continuous-memory";
 import { AiQuotaError, parseJson } from "@/server/ai/gemini";
@@ -41,13 +41,18 @@ import {
   fail,
   getHostName,
   getParticipantNames,
+  jsonStrings,
   replaceDecisions,
   requireOwnedMeeting,
-  resolveAssignee,
   saveExtractedActionItems,
   type ActionItemRow,
   type DecisionRow,
 } from "@/server/meetings";
+import {
+  reconcileAfterMeeting,
+  reconcileTaskProgress,
+  type TaskProgressResult,
+} from "@/server/task-progress";
 
 const str = (max: number) => z.string().trim().max(max);
 const nullableStr = (max: number) =>
@@ -130,6 +135,7 @@ function withTaskDefaults(
   items: ExtractedItem[],
   followUps: string[],
   hostName: string,
+  participants: string[],
 ): ExtractedItem[] {
   const source =
     items.length > 0
@@ -137,7 +143,10 @@ function withTaskDefaults(
       : followUps.map((title) => ({ title: title.slice(0, 500), assignee: null, deadline: null }));
   return source
     .filter((a) => a.title.trim())
-    .map((a) => ({ ...a, assignee: resolveAssignee(a.assignee, hostName) ?? hostName }));
+    .map((a) => ({
+      ...a,
+      assignee: resolveTaskAssignee(a.assignee, hostName, participants) ?? hostName,
+    }));
 }
 
 type SummaryPayload = {
@@ -231,10 +240,11 @@ export const summarizeMeeting = createServerFn({ method: "POST" })
     const savedItems = await saveExtractedActionItems(
       supabase,
       meeting,
-      withTaskDefaults(parsed.action_items, parsed.follow_ups, hostName),
+      withTaskDefaults(parsed.action_items, parsed.follow_ups, hostName, participants),
       { hostName },
     );
     await replaceDecisions(supabase, meeting.id, parsed.decisions);
+    await reconcileAfterMeeting(supabase, userId, meeting.id);
 
     const { error: notifErr } = await supabase.from("notifications").insert({
       user_id: userId,
@@ -273,8 +283,9 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
       const { supabase, userId } = context;
       const meeting = await requireOwnedMeeting(supabase, userId, data.meetingId);
 
-      const [hostName, segsRes, summaryRes] = await Promise.all([
+      const [hostName, participants, segsRes, summaryRes] = await Promise.all([
         getHostName(supabase, userId),
+        getParticipantNames(supabase, meeting.id),
         supabase
           .from("transcripts")
           .select("speaker, content")
@@ -306,6 +317,7 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
                 text: extractionPrompt({
                   title: meeting.title,
                   hostName,
+                  participants,
                   summary,
                   keyPoints,
                   transcript,
@@ -339,11 +351,21 @@ export const syncMeetingActionItems = createServerFn({ method: "POST" })
           supported.map(({ evidence: _evidence, ...item }) => item),
           parsed.action_items.length > 0 ? [] : followUps,
           hostName,
+          participants,
         ),
         { hostName, evidenceText: recordsText },
       );
       const decisions = await replaceDecisions(supabase, meeting.id, parsed.decisions);
-      return { action_items, decisions };
+      const progress = await reconcileAfterMeeting(supabase, userId, meeting.id);
+      if (!progress || progress.updated === 0) return { action_items, decisions };
+      const { data: refreshed, error: refreshErr } = await supabase
+        .from("action_items")
+        .select("*")
+        .eq("meeting_id", meeting.id)
+        .order("created_at", { ascending: true });
+      if (refreshErr)
+        fail("reload action items", refreshErr, "Could not load the meeting's tasks.");
+      return { action_items: refreshed ?? action_items, decisions };
     },
   );
 
@@ -476,14 +498,6 @@ const aiProjectReport = z.object({
   next_steps: strList(10),
   suggested_agenda: strList(6),
 });
-
-function jsonStrings(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value
-        .filter((v): v is string => typeof v === "string" && v.trim() !== "")
-        .map((v) => v.trim())
-    : [];
-}
 
 function dedupe(items: string[], limit: number): string[] {
   const seen = new Set<string>();
@@ -1323,121 +1337,9 @@ export const createActionItemServer = createServerFn({ method: "POST" })
     return { success: true as const, task };
   });
 
-const TRANSCRIPT_PAGE = 1000;
-
-async function loadMeetingProgress(supabase: Client, meetingId: string) {
-  const segments: Array<{ speaker: string; content: string }> = [];
-  for (let from = 0; ; from += TRANSCRIPT_PAGE) {
-    const { data, error } = await supabase
-      .from("transcripts")
-      .select("speaker, content")
-      .eq("meeting_id", meetingId)
-      .order("segment_index", { ascending: true })
-      .range(from, from + TRANSCRIPT_PAGE - 1);
-    if (error) fail("load transcript", error, "Could not load a meeting transcript.");
-    segments.push(...(data ?? []));
-    if (!data || data.length < TRANSCRIPT_PAGE) break;
-  }
-
-  const [summaryRes, tasksRes, participantsRes] = await Promise.all([
-    supabase
-      .from("ai_summaries")
-      .select("executive_summary, key_points")
-      .eq("meeting_id", meetingId)
-      .maybeSingle(),
-    supabase
-      .from("action_items")
-      .select("id, meeting_id, title, status, canonical_key")
-      .eq("meeting_id", meetingId),
-    supabase.from("participants").select("name").eq("meeting_id", meetingId),
-  ]);
-  if (summaryRes.error) fail("load summary", summaryRes.error, "Could not load a meeting summary.");
-  if (tasksRes.error) fail("load tasks", tasksRes.error, "Could not load the meeting's tasks.");
-  if (participantsRes.error) {
-    fail("load participants", participantsRes.error, "Could not load the meeting participants.");
-  }
-
-  const text = [
-    transcriptText(segments),
-    summaryRes.data?.executive_summary ?? "",
-    ...jsonStrings(summaryRes.data?.key_points),
-  ].join("\n");
-  return {
-    text,
-    tasks: tasksRes.data ?? [],
-    names: (participantsRes.data ?? []).map((p) => p.name.trim()).filter(Boolean),
-  };
-}
-
-async function applyStatus(
-  supabase: Client,
-  ids: string[],
-  status: "in_progress" | "done",
-): Promise<number> {
-  let count = 0;
-  for (let i = 0; i < ids.length; i += 100) {
-    let query = supabase
-      .from("action_items")
-      .update({ status })
-      .in("id", ids.slice(i, i + 100))
-      .neq("status", "done");
-    if (status === "in_progress") query = query.neq("status", "in_progress");
-    const { data, error } = await query.select("id");
-    if (error) fail("update task progress", error, "Could not update task progress.");
-    count += data?.length ?? 0;
-  }
-  return count;
-}
-
 export const reconcileProjectTasks = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input?: z.input<typeof NoInput>) => parseInput(NoInput, input))
-  .handler(async ({ context }): Promise<{ updated: number; done: number; in_progress: number }> => {
-    const { supabase, userId } = context;
-
-    const { data: meetingRows, error } = await supabase
-      .from("meetings")
-      .select("id, project_id, scheduled_at, started_at, created_at")
-      .eq("host_id", userId);
-    if (error) fail("load meetings", error, "Could not load your meetings.");
-    if (!meetingRows || meetingRows.length === 0) return { updated: 0, done: 0, in_progress: 0 };
-
-    const records = new Map<string, Awaited<ReturnType<typeof loadMeetingProgress>>>();
-    for (let i = 0; i < meetingRows.length; i += 5) {
-      const batch = meetingRows.slice(i, i + 5);
-      const loaded = await Promise.all(batch.map((m) => loadMeetingProgress(supabase, m.id)));
-      batch.forEach((m, j) => records.set(m.id, loaded[j]));
-    }
-
-    const groups = new Map<string, typeof meetingRows>();
-    for (const m of meetingRows) {
-      const key = m.project_id ?? "";
-      groups.set(key, [...(groups.get(key) ?? []), m]);
-    }
-
-    const doneIds: string[] = [];
-    const progressIds: string[] = [];
-    for (const group of groups.values()) {
-      const loaded = group.map((m) => ({ meeting: m, record: records.get(m.id) }));
-      const updates = planTaskProgressUpdates(
-        loaded.map(({ meeting, record }) => ({
-          id: meeting.id,
-          date: meeting.started_at ?? meeting.scheduled_at ?? meeting.created_at,
-          text: record?.text ?? "",
-        })),
-        loaded.flatMap(({ record }) => record?.tasks ?? []),
-        dedupe(
-          loaded.flatMap(({ record }) => record?.names ?? []),
-          100,
-        ),
-      );
-      for (const u of updates) {
-        if (u.status === "done") doneIds.push(u.id);
-        else if (u.status === "in_progress") progressIds.push(u.id);
-      }
-    }
-
-    const done = await applyStatus(supabase, doneIds, "done");
-    const in_progress = await applyStatus(supabase, progressIds, "in_progress");
-    return { updated: done + in_progress, done, in_progress };
-  });
+  .handler(async ({ context }): Promise<TaskProgressResult> =>
+    reconcileTaskProgress(context.supabase, context.userId),
+  );

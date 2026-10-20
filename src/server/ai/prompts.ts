@@ -21,6 +21,15 @@ export function transcriptText(
   return (segments ?? []).map((s) => `${s.speaker}: ${s.content}`).join("\n");
 }
 
+function ownerRules(hostName: string): string {
+  return `Ownership rules for action items:
+  - The assignee is the person who committed to doing the task: the speaker who says "I will...", "I'll...", "I can handle..." or "I'll take care of...", or the person another speaker clearly gives the task to and who accepts it.
+  - Use that speaker's label exactly as it appears in the transcript, including generic labels such as "Remote Participant". Never move a task to the organiser just because the speaker has no real name.
+  - Use "${hostName}" only when the organiser is the one who commits to the task.
+  - When people commit to doing something together (for example "we will review everything together on Friday"), include it as one task and list every person involved as the assignee, joined with " and ".
+  - Use null only when nobody committed to the task.`;
+}
+
 export const SUMMARY_SYSTEM = `You analyse meeting transcripts and return strict JSON only.
 Only use facts present in the transcript and any attached slides or screenshots. Do not invent people, tasks, dates or decisions.
 If information is missing, return empty arrays.
@@ -43,7 +52,9 @@ Return JSON with:
 - key_points: up to 6 strings.
 - risks: up to 4 strings.
 - follow_ups: up to 5 strings.
-- action_items: [{ title, assignee, deadline, status }]. assignee is the person's name exactly as spoken, or null if nobody was named. If the organiser takes a task, use "${p.hostName}". deadline is the deadline as stated (for example "Friday" or "2026-11-03"), or null. status is "done" only if the transcript says the task is already finished, "in_progress" if someone says they have started it, are working on it or it is partly done, otherwise "pending".
+- action_items: [{ title, assignee, deadline, status }]. Include shared or joint commitments.
+${ownerRules(p.hostName)}
+  deadline is the deadline as stated (for example "Friday" or "2026-11-03"), or null. status is "done" only if the transcript says the task is already finished, "in_progress" if someone says they have started it, are working on it or it is partly done, otherwise "pending".
 - decisions: [{ description, made_by }] with no duplicates; made_by is a name or null.`;
 }
 
@@ -87,19 +98,23 @@ ${UNTRUSTED_NOTE}`;
 export function extractionPrompt(p: {
   title: string;
   hostName: string;
+  participants: string[];
   summary: string;
   keyPoints: string[];
   transcript: string;
 }): string {
   return `Meeting title: ${p.title}
 Organiser: ${p.hostName}
+Known participants: ${p.participants.join(", ") || "not recorded"}
 
 ${asData("summary", [p.summary, ...p.keyPoints].filter(Boolean).join("\n"), 20_000)}
 
 ${asData("transcript", p.transcript)}
 
 Return JSON with:
-- action_items: [{ title, assignee, deadline, status, evidence }] for every participant. assignee is the person's name as spoken, or null. If the organiser takes a task, use "${p.hostName}". deadline as stated, or null.
+- action_items: [{ title, assignee, deadline, status, evidence }] for every participant, including shared or joint commitments such as a review everyone will do together.
+${ownerRules(p.hostName)}
+  deadline as stated, or null.
   status is "done" when the records say the task was finished, "in_progress" when someone says they have started it, are working on it or it is partly done, otherwise "pending".
   evidence is a short quote of at most 200 characters copied word for word from the records that shows the task and its status. Leave out any task you cannot quote.
 - decisions: [{ description, made_by }] without duplicates.`;

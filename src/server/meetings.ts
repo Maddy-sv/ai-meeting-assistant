@@ -9,7 +9,7 @@ import {
   statusFromRecords,
 } from "@/lib/continuous-memory";
 
-type Client = SupabaseClient<Database>;
+export type Client = SupabaseClient<Database>;
 export type ActionItemRow = Tables<"action_items">;
 export type DecisionRow = Tables<"decisions">;
 export type MeetingRow = Tables<"meetings">;
@@ -17,6 +17,14 @@ export type MeetingRow = Tables<"meetings">;
 export function fail(context: string, error: { message: string }, userMessage: string): never {
   console.error(`[db] ${context}:`, error.message);
   throw new Error(userMessage);
+}
+
+export function jsonStrings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+        .map((v) => v.trim())
+    : [];
 }
 
 export async function requireOwnedMeeting(
